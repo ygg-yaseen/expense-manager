@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { 
-  User, 
   Download, 
   Upload, 
   Trash2, 
@@ -12,12 +11,17 @@ import {
   UserPlus,
   Tag,
   Plus,
+  Cloud,
+  CloudLightning,
+  RefreshCw,
+  Copy,
   Sparkles
 } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { SUPPORTED_CURRENCIES } from '../types';
 import { AuthService } from '../services/authService';
 import { StorageService } from '../services/storage';
+import { SupabaseService } from '../services/supabaseClient';
 
 interface ProfileSettingsProps {
   profile: UserProfile;
@@ -47,6 +51,15 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [name, setName] = useState<string>(profile.name);
   const [currencyCode, setCurrencyCode] = useState<string>(profile.currency.code);
   const [avatarColor, setAvatarColor] = useState<string>(profile.avatarColor || '#6366f1');
+
+  // Supabase Cloud Credentials State
+  const initialCreds = SupabaseService.getCredentials();
+  const [supabaseUrl, setSupabaseUrl] = useState<string>(initialCreds.url);
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(initialCreds.anonKey);
+  const [isTestingCloud, setIsTestingCloud] = useState<boolean>(false);
+  const [cloudStatus, setCloudStatus] = useState<string>(
+    SupabaseService.isConfigured() ? 'Cloud database configured' : 'Using Local Storage'
+  );
 
   // Security PIN Modal
   const [showPinModal, setShowPinModal] = useState<boolean>(false);
@@ -83,6 +96,95 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
 
     onUpdateProfile();
     setMessage({ text: 'Profile updated successfully!', type: 'success' });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleSaveSupabaseConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsTestingCloud(true);
+
+    const isSaved = SupabaseService.saveCredentials(supabaseUrl, supabaseAnonKey);
+    if (!isSaved) {
+      setCloudStatus('Cloud credentials cleared. Operating in local mode.');
+      setIsTestingCloud(false);
+      setMessage({ text: 'Cloud database disconnected. Using local storage.', type: 'success' });
+      setTimeout(() => setMessage(null), 3000);
+      return;
+    }
+
+    const test = await SupabaseService.testConnection();
+    setIsTestingCloud(false);
+
+    if (test.success) {
+      setCloudStatus('🟢 Supabase Cloud Database Connected & Synced!');
+      setMessage({ text: 'Supabase Cloud Database connected successfully!', type: 'success' });
+      // Trigger initial cloud pull & push
+      await StorageService.pullCloudData();
+      await SupabaseService.syncProfile(profile);
+      onUpdateProfile();
+    } else {
+      setCloudStatus(`⚠️ Connection warning: ${test.error || 'Failed'}`);
+      setMessage({ text: `Cloud connection warning: ${test.error}`, type: 'error' });
+    }
+    setTimeout(() => setMessage(null), 4000);
+  };
+
+  const handleSyncCloudNow = async () => {
+    setIsTestingCloud(true);
+    const success = await StorageService.pullCloudData();
+    await SupabaseService.syncProfile(profile);
+    setIsTestingCloud(false);
+    onUpdateProfile();
+    setMessage({ text: success ? 'Cloud database synced!' : 'Synced local data.', type: 'success' });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleCopySqlScript = () => {
+    const sqlScript = `-- ExpenseFlow Supabase Schema
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT,
+  avatar_color TEXT DEFAULT '#6366f1',
+  currency JSONB NOT NULL,
+  pin TEXT NOT NULL,
+  monthly_budget NUMERIC DEFAULT 3000,
+  category_budgets JSONB DEFAULT '[]'::jsonb,
+  custom_categories JSONB DEFAULT '[]'::jsonb,
+  custom_sub_categories JSONB DEFAULT '{}'::jsonb,
+  auto_lock_minutes INTEGER DEFAULT 0,
+  is_dark_mode BOOLEAN DEFAULT true,
+  created_at BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.transactions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('expense', 'income')),
+  category_id TEXT NOT NULL,
+  sub_category TEXT,
+  date TEXT NOT NULL,
+  time TEXT,
+  payment_method TEXT NOT NULL,
+  notes TEXT,
+  created_at BIGINT NOT NULL
+);
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow anon read profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Allow anon insert profiles" ON public.profiles FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow anon update profiles" ON public.profiles FOR UPDATE USING (true);
+CREATE POLICY "Allow anon delete profiles" ON public.profiles FOR DELETE USING (true);
+CREATE POLICY "Allow anon read transactions" ON public.transactions FOR SELECT USING (true);
+CREATE POLICY "Allow anon insert transactions" ON public.transactions FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow anon update transactions" ON public.transactions FOR UPDATE USING (true);
+CREATE POLICY "Allow anon delete transactions" ON public.transactions FOR DELETE USING (true);`;
+
+    navigator.clipboard.writeText(sqlScript);
+    setMessage({ text: 'Supabase SQL Setup Script copied to clipboard!', type: 'success' });
     setTimeout(() => setMessage(null), 3000);
   };
 
@@ -195,13 +297,13 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
         <div>
           <div className="flex items-center gap-2 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-1">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Settings & Preferences</span>
+            <span>Cloud & System Configuration</span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
-            <User className="w-6 h-6 text-indigo-400" /> User Profile & Category Manager
+            <Cloud className="w-6 h-6 text-indigo-400" /> User Profile & Supabase Cloud Sync
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage profiles, custom categories & sub-categories, 4-digit PIN security, and database backup.
+            Manage profiles, 4-digit PIN security, Supabase cloud database sync, and categories.
           </p>
         </div>
       </div>
@@ -221,6 +323,83 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Supabase Cloud Database Sync Card */}
+          <form onSubmit={handleSaveSupabaseConfig} className="glass-card p-6 sm:p-7 rounded-3xl space-y-5 border border-indigo-500/30">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                  <CloudLightning className="w-5 h-5 text-indigo-400" /> Supabase Cloud Database Sync
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Sync all profiles & transactions across phone, laptop & web in real time.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  {cloudStatus}
+                </span>
+                {SupabaseService.isConfigured() && (
+                  <button
+                    type="button"
+                    onClick={handleSyncCloudNow}
+                    disabled={isTestingCloud}
+                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+                    title="Sync Cloud Data Now"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isTestingCloud ? 'animate-spin text-indigo-400' : ''}`} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Supabase Project URL
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://xyzcompany.supabase.co"
+                  value={supabaseUrl}
+                  onChange={(e) => setSupabaseUrl(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Supabase Anon Key
+                </label>
+                <input
+                  type="password"
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                  value={supabaseAnonKey}
+                  onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <button
+                type="button"
+                onClick={handleCopySqlScript}
+                className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-indigo-400 text-xs font-bold border border-slate-800 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" /> Copy Supabase SQL Setup Script
+              </button>
+
+              <button
+                type="submit"
+                disabled={isTestingCloud}
+                className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition cursor-pointer flex items-center gap-2"
+              >
+                {isTestingCloud ? 'Connecting...' : 'Connect Cloud Database'}
+              </button>
+            </div>
+          </form>
+
           {/* Custom Category & Sub-Category Manager */}
           <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -500,22 +679,22 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
         <div className="space-y-6">
           <div className="glass-panel p-6 rounded-3xl space-y-4 border border-indigo-500/30 relative overflow-hidden">
             <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold uppercase tracking-wider">
-              <Smartphone className="w-4 h-4" /> Database & Cross-Platform Info
+              <Smartphone className="w-4 h-4" /> Cloud & Mobile Info
             </div>
-            <h3 className="text-lg font-bold text-slate-100">Database Architecture 🗄️</h3>
+            <h3 className="text-lg font-bold text-slate-100">Hybrid Cloud Engine ⚡</h3>
             
             <div className="space-y-3 text-xs leading-relaxed text-slate-300">
               <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
-                <span className="font-bold text-slate-200 block">💾 Web Database: Browser LocalStorage / IndexedDB</span>
+                <span className="font-bold text-slate-200 block">☁️ Supabase Cloud Synchronization</span>
                 <p className="text-[11px] text-slate-400">
-                  Data is stored in high-performance key-value local storage directly on your browser/device. Fully private, offline-first, and zero external latency.
+                  Connect your free Supabase URL & Key above to sync all profiles & expenses across all your phones, laptops, and tablets automatically.
                 </p>
               </div>
 
               <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
-                <span className="font-bold text-slate-200 block">📱 Mobile Database: Native SQLite / SecureStorage</span>
+                <span className="font-bold text-slate-200 block">💾 Local Offline Cache</span>
                 <p className="text-[11px] text-slate-400">
-                  When packaged into Android / iOS apps using Capacitor or React Native, it uses native **SQLite database engine** with encrypted local keychains.
+                  Even when offline or in airplane mode, your data remains fully accessible and automatically syncs to the cloud when internet returns.
                 </p>
               </div>
             </div>

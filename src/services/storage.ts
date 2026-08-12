@@ -1,4 +1,5 @@
 import type { UserProfile, Transaction } from '../types';
+import { SupabaseService } from './supabaseClient';
 
 const STORAGE_KEYS = {
   PROFILES: 'em_user_profiles',
@@ -42,56 +43,13 @@ const INITIAL_DEMO_TRANSACTIONS = (userId: string): Transaction[] => {
       date: formatDate(3),
       time: '14:00',
       paymentMethod: 'Credit Card',
-      notes: 'Room booking & luxury hill view stay',
+      notes: 'Room booking & stay',
       createdAt: Date.now() - 86400000 * 3,
-    },
-    {
-      id: `tx-3-${userId}`,
-      userId,
-      title: 'Whole Foods Grocery',
-      amount: 142.50,
-      type: 'expense',
-      categoryId: 'food',
-      subCategory: 'Groceries',
-      date: formatDate(1),
-      time: '17:30',
-      paymentMethod: 'Credit Card',
-      notes: 'Weekly fresh fruits & organic veggies',
-      createdAt: Date.now() - 86400000 * 1,
-    },
-    {
-      id: `tx-4-${userId}`,
-      userId,
-      title: 'Ooty Taxi & Sightseeing',
-      amount: 85.00,
-      type: 'expense',
-      categoryId: 'travel',
-      subCategory: 'Ooty-Aug',
-      date: formatDate(2),
-      time: '11:15',
-      paymentMethod: 'Cash',
-      notes: 'Botanical garden & tea estate tour cab fare',
-      createdAt: Date.now() - 86400000 * 2,
-    },
-    {
-      id: `tx-5-${userId}`,
-      userId,
-      title: 'Starbucks Coffee',
-      amount: 14.80,
-      type: 'expense',
-      categoryId: 'food',
-      subCategory: 'Coffee & Tea',
-      date: formatDate(0),
-      time: '08:45',
-      paymentMethod: 'UPI/Mobile Wallet',
-      notes: 'Morning latte & croissant',
-      createdAt: Date.now(),
     },
   ];
 };
 
 export class StorageService {
-  // Migration helper: Convert single profile to multi-user array if needed
   private static initProfilesStorage(): UserProfile[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.PROFILES);
@@ -99,7 +57,6 @@ export class StorageService {
         return JSON.parse(data);
       }
 
-      // Check old single profile
       const oldProfileStr = localStorage.getItem(STORAGE_KEYS.OLD_SINGLE_PROFILE);
       if (oldProfileStr) {
         const oldProfile = JSON.parse(oldProfileStr);
@@ -111,7 +68,6 @@ export class StorageService {
         localStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(profilesList));
         localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, migratedProfile.id);
 
-        // Migrate old transactions
         const oldTxs = localStorage.getItem(STORAGE_KEYS.OLD_SINGLE_TRANSACTIONS);
         if (oldTxs) {
           localStorage.setItem(`em_transactions_${migratedProfile.id}`, oldTxs);
@@ -127,12 +83,10 @@ export class StorageService {
     }
   }
 
-  // Get all registered user profiles
   static getAllProfiles(): UserProfile[] {
     return this.initProfilesStorage();
   }
 
-  // Get active user profile
   static getProfile(): UserProfile | null {
     const profiles = this.getAllProfiles();
     if (profiles.length === 0) return null;
@@ -148,12 +102,10 @@ export class StorageService {
     return active;
   }
 
-  // Switch active user profile
   static setActiveUserId(userId: string): void {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, userId);
   }
 
-  // Save or update a specific user profile
   static saveProfile(profile: UserProfile): void {
     const profiles = this.getAllProfiles();
     const index = profiles.findIndex((p) => p.id === profile.id);
@@ -166,9 +118,13 @@ export class StorageService {
 
     localStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(profiles));
     localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, profile.id);
+
+    // Asynchronously sync profile to Supabase Cloud DB
+    if (SupabaseService.isConfigured()) {
+      SupabaseService.syncProfile(profile);
+    }
   }
 
-  // Delete a user profile and their data
   static deleteProfile(userId: string): void {
     let profiles = this.getAllProfiles();
     profiles = profiles.filter((p) => p.id !== userId);
@@ -182,7 +138,6 @@ export class StorageService {
     }
   }
 
-  // Clear all data
   static resetAllData(): void {
     localStorage.removeItem(STORAGE_KEYS.PROFILES);
     localStorage.removeItem(STORAGE_KEYS.ACTIVE_USER_ID);
@@ -190,7 +145,6 @@ export class StorageService {
     localStorage.removeItem(STORAGE_KEYS.OLD_SINGLE_PROFILE);
     localStorage.removeItem(STORAGE_KEYS.OLD_SINGLE_TRANSACTIONS);
     
-    // Clear per-user tx keys
     Object.keys(localStorage).forEach((key) => {
       if (key.startsWith('em_transactions_')) {
         localStorage.removeItem(key);
@@ -198,17 +152,15 @@ export class StorageService {
     });
   }
 
-  // Lock status
   static isAppLocked(): boolean {
     const status = localStorage.getItem(STORAGE_KEYS.IS_LOCKED);
-    return status === 'true'; // Default unlocked unless manually locked
+    return status === 'true';
   }
 
   static setAppLocked(locked: boolean): void {
     localStorage.setItem(STORAGE_KEYS.IS_LOCKED, String(locked));
   }
 
-  // Get transactions for active user
   static getTransactions(userId?: string): Transaction[] {
     const activeUser = this.getProfile();
     const id = userId || (activeUser ? activeUser.id : null);
@@ -224,7 +176,6 @@ export class StorageService {
     }
   }
 
-  // Save transactions for active user
   static saveTransactions(transactions: Transaction[], userId?: string): void {
     const activeUser = this.getProfile();
     const id = userId || (activeUser ? activeUser.id : null);
@@ -237,20 +188,42 @@ export class StorageService {
     }
   }
 
-  // Initialize demo data for specified user
   static loadDemoData(userId: string): void {
     const demoTxs = INITIAL_DEMO_TRANSACTIONS(userId);
     this.saveTransactions(demoTxs, userId);
   }
 
-  // Export full user dataset as JSON string
+  // Pull latest cloud data from Supabase into LocalStorage
+  static async pullCloudData(): Promise<boolean> {
+    if (!SupabaseService.isConfigured()) return false;
+
+    try {
+      const cloudProfiles = await SupabaseService.fetchCloudProfiles();
+      if (cloudProfiles.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(cloudProfiles));
+
+        for (const p of cloudProfiles) {
+          const cloudTxs = await SupabaseService.fetchCloudTransactions(p.id);
+          if (cloudTxs.length > 0) {
+            localStorage.setItem(`em_transactions_${p.id}`, JSON.stringify(cloudTxs));
+          }
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Failed to pull cloud database sync:', err);
+      return false;
+    }
+  }
+
   static exportFullBackup(): string {
     const profiles = this.getAllProfiles();
     const activeUser = this.getProfile();
     const transactions = this.getTransactions();
 
     const payload = {
-      version: '2.0.0',
+      version: '3.0.0',
       exportedAt: new Date().toISOString(),
       activeUser,
       profiles,
@@ -259,7 +232,6 @@ export class StorageService {
     return JSON.stringify(payload, null, 2);
   }
 
-  // Import full dataset from JSON string
   static importFullBackup(jsonString: string): boolean {
     try {
       const parsed = JSON.parse(jsonString);
@@ -286,7 +258,6 @@ export class StorageService {
     }
   }
 
-  // Export transactions to CSV
   static exportTransactionsCSV(): string {
     const txs = this.getTransactions();
     if (txs.length === 0) return '';

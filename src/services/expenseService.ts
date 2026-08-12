@@ -1,10 +1,10 @@
 import { StorageService } from './storage';
 import { AuthService } from './authService';
+import { SupabaseService } from './supabaseClient';
 import type { Transaction, SummaryStats, CategoryDef, CategoryId } from '../types';
 import { CATEGORIES } from '../types';
 
 export class ExpenseService {
-  // Get all transactions sorted by date descending
   static getAll(): Transaction[] {
     return StorageService.getTransactions().sort((a, b) => {
       const dateA = new Date(`${a.date}T${a.time || '00:00'}`).getTime();
@@ -13,9 +13,8 @@ export class ExpenseService {
     });
   }
 
-  // Filter transactions by criteria
   static filter(params: {
-    monthYear?: string; // YYYY-MM
+    monthYear?: string;
     categoryId?: CategoryId | 'all';
     type?: 'all' | 'expense' | 'income';
     searchTerm?: string;
@@ -44,20 +43,29 @@ export class ExpenseService {
     return list;
   }
 
-  // Add new transaction
   static addTransaction(data: Omit<Transaction, 'id' | 'createdAt'>): Transaction {
     const list = StorageService.getTransactions();
+    const profile = AuthService.getProfile();
+    const userId = profile ? profile.id : 'usr-default';
+
     const newTx: Transaction = {
       ...data,
-      id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      userId,
       createdAt: Date.now(),
     };
+
     list.unshift(newTx);
     StorageService.saveTransactions(list);
+
+    // Sync to Supabase Cloud Database if configured
+    if (SupabaseService.isConfigured()) {
+      SupabaseService.syncTransaction(newTx);
+    }
+
     return newTx;
   }
 
-  // Update existing transaction
   static updateTransaction(id: string, updates: Partial<Omit<Transaction, 'id' | 'createdAt'>>): boolean {
     const list = StorageService.getTransactions();
     const index = list.findIndex(t => t.id === id);
@@ -65,20 +73,30 @@ export class ExpenseService {
 
     list[index] = { ...list[index], ...updates };
     StorageService.saveTransactions(list);
+
+    // Sync updated tx to cloud
+    if (SupabaseService.isConfigured()) {
+      SupabaseService.syncTransaction(list[index]);
+    }
+
     return true;
   }
 
-  // Delete transaction
   static deleteTransaction(id: string): boolean {
     const list = StorageService.getTransactions();
     const filtered = list.filter(t => t.id !== id);
     if (filtered.length === list.length) return false;
 
     StorageService.saveTransactions(filtered);
+
+    // Delete from cloud
+    if (SupabaseService.isConfigured()) {
+      SupabaseService.deleteCloudTransaction(id);
+    }
+
     return true;
   }
 
-  // Calculate monthly summary stats
   static getMonthlySummary(monthYear?: string): SummaryStats {
     const profile = AuthService.getProfile();
     const monthlyBudget = profile ? profile.monthlyBudget : 0;
@@ -97,7 +115,6 @@ export class ExpenseService {
     const remainingBudget = Math.max(0, monthlyBudget - totalSpent);
     const budgetPercentage = monthlyBudget > 0 ? Math.min(100, Math.round((totalSpent / monthlyBudget) * 100)) : 0;
 
-    // Calculate days & daily average
     const now = new Date();
     const currentMonthYear = now.toISOString().slice(0, 7);
     const isCurrentMonth = targetMonthYear === currentMonthYear;
@@ -116,7 +133,6 @@ export class ExpenseService {
 
     const dailyAverage = Math.round((totalSpent / elapsedDays) * 100) / 100;
 
-    // Projected pace
     const projectedTotal = dailyAverage * daysInMonth;
     let spendingPace: 'under' | 'moderate' | 'over' = 'under';
     if (projectedTotal > monthlyBudget * 1.1) {
@@ -125,7 +141,6 @@ export class ExpenseService {
       spendingPace = 'moderate';
     }
 
-    // Top category spent
     const categoryMap: Record<string, number> = {};
     txs.filter(t => t.type === 'expense').forEach(t => {
       categoryMap[t.categoryId] = (categoryMap[t.categoryId] || 0) + t.amount;
@@ -141,7 +156,8 @@ export class ExpenseService {
       }
     });
 
-    const topCategoryDef = topCategoryId ? CATEGORIES.find(c => c.id === topCategoryId) : undefined;
+    const allCats = AuthService.getCategories(profile);
+    const topCategoryDef = topCategoryId ? allCats.find(c => c.id === topCategoryId) : undefined;
     const topCategory = topCategoryDef ? { category: topCategoryDef, total: maxCategorySpent } : undefined;
 
     return {
@@ -156,13 +172,14 @@ export class ExpenseService {
     };
   }
 
-  // Get category breakdown stats for donut/bar charts
   static getCategoryBreakdown(monthYear?: string): Array<{
     category: CategoryDef;
     total: number;
     percentage: number;
     count: number;
   }> {
+    const profile = AuthService.getProfile();
+    const allCats = AuthService.getCategories(profile);
     const targetMonthYear = monthYear || new Date().toISOString().slice(0, 7);
     const txs = this.filter({ monthYear: targetMonthYear, type: 'expense' });
 
@@ -179,7 +196,7 @@ export class ExpenseService {
 
     return Object.entries(map)
       .map(([catId, data]) => {
-        const category = CATEGORIES.find(c => c.id === catId) || CATEGORIES[CATEGORIES.length - 1];
+        const category = allCats.find(c => c.id === catId) || CATEGORIES[CATEGORIES.length - 1];
         return {
           category,
           total: data.total,
@@ -190,7 +207,6 @@ export class ExpenseService {
       .sort((a, b) => b.total - a.total);
   }
 
-  // Get last 6 months trend data for charts
   static getMonthlyTrendData(monthsCount: number = 6): Array<{
     monthYear: string;
     monthLabel: string;
