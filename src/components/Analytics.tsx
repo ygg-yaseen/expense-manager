@@ -153,7 +153,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ profile }) => {
                     cy="50%"
                     outerRadius={80}
                     dataKey="total"
-                    label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
+                    label={({ name, percent }: any) => `${name || ''} (${((percent || 0) * 100).toFixed(0)}%)`}
                   >
                     {breakdown.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.category.color} />
