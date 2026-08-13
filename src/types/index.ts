@@ -46,7 +46,6 @@ export const DEFAULT_CATEGORIES: CategoryDef[] = [
 
 export const CATEGORIES = DEFAULT_CATEGORIES;
 
-// No demo data for sub-categories by default - purely user-created
 export const DEFAULT_PRESET_SUB_CATEGORIES: Record<string, string[]> = {};
 export const PRESET_SUB_CATEGORIES = DEFAULT_PRESET_SUB_CATEGORIES;
 
@@ -64,6 +63,25 @@ export interface Transaction {
   time?: string;
   paymentMethod: PaymentMethod;
   notes?: string;
+  createdAt: number;
+}
+
+export type RecurrenceFrequency = 'monthly' | 'quarterly' | 'yearly' | 'weekly';
+
+export interface RecurringExpense {
+  id: string;
+  userId?: string;
+  title: string; // e.g. "Car Loan EMI", "House Rent", "Netflix"
+  amount: number;
+  categoryId: CategoryId;
+  subCategory?: string;
+  frequency: RecurrenceFrequency;
+  dueDateDay: number; // Day of month (1-31)
+  startDate: string; // YYYY-MM-DD
+  paymentMethod: PaymentMethod;
+  notes?: string;
+  isActive: boolean;
+  lastProcessedMonth?: string; // YYYY-MM when it was last logged as transaction
   createdAt: number;
 }
 

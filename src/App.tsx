@@ -9,6 +9,7 @@ import { Navbar } from './components/Navbar';
 import type { NavTab } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { Transactions } from './components/Transactions';
+import { RecurringExpenses } from './components/RecurringExpenses';
 import { BudgetManager } from './components/BudgetManager';
 import { Analytics } from './components/Analytics';
 import { ProfileSettings } from './components/ProfileSettings';
@@ -144,7 +145,7 @@ export function App() {
               setEditingTransaction(null);
               setIsExpenseModalOpen(true);
             }}
-            onNavigateTab={(tab) => setActiveTab(tab)}
+            onNavigateTab={(tab) => setActiveTab(tab as any)}
           />
         )}
 
@@ -156,6 +157,13 @@ export function App() {
               setIsExpenseModalOpen(true);
             }}
             onEditExpense={handleEditExpense}
+            onRefreshData={refreshData}
+          />
+        )}
+
+        {activeTab === 'recurring' && (
+          <RecurringExpenses
+            profile={profile}
             onRefreshData={refreshData}
           />
         )}

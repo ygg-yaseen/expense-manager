@@ -10,12 +10,13 @@ import {
   Users,
   UserPlus,
   ChevronDown,
-  Check
+  Check,
+  Repeat
 } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { AuthService } from '../services/authService';
 
-export type NavTab = 'dashboard' | 'transactions' | 'budget' | 'analytics' | 'profile';
+export type NavTab = 'dashboard' | 'transactions' | 'recurring' | 'budget' | 'analytics' | 'profile';
 
 interface NavbarProps {
   profile: UserProfile;
@@ -42,6 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems: Array<{ id: NavTab; label: string; icon: React.FC<{ className?: string }> }> = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'transactions', label: 'Transactions', icon: ReceiptText },
+    { id: 'recurring', label: 'EMIs & Bills', icon: Repeat },
     { id: 'budget', label: 'Budget', icon: Wallet },
     { id: 'analytics', label: 'Analytics', icon: PieChart },
     { id: 'profile', label: 'Profile', icon: User },
@@ -86,7 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   key={item.id}
                   onClick={() => onTabChange(item.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                     isActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -200,7 +202,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               key={item.id}
               onClick={() => onTabChange(item.id)}
-              className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+              className={`flex flex-col items-center gap-1 px-2.5 py-1 rounded-xl transition-all cursor-pointer ${
                 isActive ? 'text-indigo-400 font-bold scale-105' : 'text-slate-400 hover:text-slate-200'
               }`}
             >

@@ -1,4 +1,4 @@
-import type { UserProfile, Transaction } from '../types';
+import type { UserProfile, Transaction, RecurringExpense } from '../types';
 import { SupabaseService } from './supabaseClient';
 
 const STORAGE_KEYS = {
@@ -7,46 +7,6 @@ const STORAGE_KEYS = {
   IS_LOCKED: 'em_is_locked',
   OLD_SINGLE_PROFILE: 'em_user_profile',
   OLD_SINGLE_TRANSACTIONS: 'em_transactions',
-};
-
-const INITIAL_DEMO_TRANSACTIONS = (userId: string): Transaction[] => {
-  const today = new Date();
-
-  const formatDate = (dayOffset: number) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - dayOffset);
-    return d.toISOString().split('T')[0];
-  };
-
-  return [
-    {
-      id: `tx-1-${userId}`,
-      userId,
-      title: 'Monthly Salary',
-      amount: 4500,
-      type: 'income',
-      categoryId: 'income',
-      date: formatDate(12),
-      time: '09:00',
-      paymentMethod: 'Bank Transfer',
-      notes: 'Company payroll direct deposit',
-      createdAt: Date.now() - 86400000 * 12,
-    },
-    {
-      id: `tx-2-${userId}`,
-      userId,
-      title: 'Ooty Vacation Resort',
-      amount: 320.00,
-      type: 'expense',
-      categoryId: 'travel',
-      subCategory: 'Ooty-Aug',
-      date: formatDate(3),
-      time: '14:00',
-      paymentMethod: 'Credit Card',
-      notes: 'Room booking & stay',
-      createdAt: Date.now() - 86400000 * 3,
-    },
-  ];
 };
 
 export class StorageService {
@@ -130,6 +90,7 @@ export class StorageService {
     profiles = profiles.filter((p) => p.id !== userId);
     localStorage.setItem(STORAGE_KEYS.PROFILES, JSON.stringify(profiles));
     localStorage.removeItem(`em_transactions_${userId}`);
+    localStorage.removeItem(`em_recurring_${userId}`);
 
     if (profiles.length > 0) {
       localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, profiles[0].id);
@@ -146,7 +107,7 @@ export class StorageService {
     localStorage.removeItem(STORAGE_KEYS.OLD_SINGLE_TRANSACTIONS);
     
     Object.keys(localStorage).forEach((key) => {
-      if (key.startsWith('em_transactions_')) {
+      if (key.startsWith('em_transactions_') || key.startsWith('em_recurring_')) {
         localStorage.removeItem(key);
       }
     });
@@ -161,6 +122,9 @@ export class StorageService {
     localStorage.setItem(STORAGE_KEYS.IS_LOCKED, String(locked));
   }
 
+  // ------------------------------------------------------------------
+  // TRANSACTIONS
+  // ------------------------------------------------------------------
   static getTransactions(userId?: string): Transaction[] {
     const activeUser = this.getProfile();
     const id = userId || (activeUser ? activeUser.id : null);
@@ -188,8 +152,74 @@ export class StorageService {
     }
   }
 
+  // ------------------------------------------------------------------
+  // RECURRING EXPENSES & EMIs
+  // ------------------------------------------------------------------
+  static getRecurringExpenses(userId?: string): RecurringExpense[] {
+    const activeUser = this.getProfile();
+    const id = userId || (activeUser ? activeUser.id : null);
+    if (!id) return [];
+
+    try {
+      const data = localStorage.getItem(`em_recurring_${id}`);
+      if (!data) return [];
+      return JSON.parse(data);
+    } catch (err) {
+      console.error(`Failed to load recurring expenses for user ${id}:`, err);
+      return [];
+    }
+  }
+
+  static saveRecurringExpenses(recurring: RecurringExpense[], userId?: string): void {
+    const activeUser = this.getProfile();
+    const id = userId || (activeUser ? activeUser.id : null);
+    if (!id) return;
+
+    try {
+      localStorage.setItem(`em_recurring_${id}`, JSON.stringify(recurring));
+    } catch (err) {
+      console.error(`Failed to save recurring expenses for user ${id}:`, err);
+    }
+  }
+
   static loadDemoData(userId: string): void {
-    const demoTxs = INITIAL_DEMO_TRANSACTIONS(userId);
+    const today = new Date();
+    const formatDate = (dayOffset: number) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() - dayOffset);
+      return d.toISOString().split('T')[0];
+    };
+
+    const demoTxs: Transaction[] = [
+      {
+        id: `tx-1-${userId}`,
+        userId,
+        title: 'Monthly Salary',
+        amount: 4500,
+        type: 'income',
+        categoryId: 'income',
+        date: formatDate(12),
+        time: '09:00',
+        paymentMethod: 'Bank Transfer',
+        notes: 'Company payroll direct deposit',
+        createdAt: Date.now() - 86400000 * 12,
+      },
+      {
+        id: `tx-2-${userId}`,
+        userId,
+        title: 'Ooty Vacation Resort',
+        amount: 320.00,
+        type: 'expense',
+        categoryId: 'travel',
+        subCategory: 'Ooty-Aug',
+        date: formatDate(3),
+        time: '14:00',
+        paymentMethod: 'Credit Card',
+        notes: 'Room booking & stay',
+        createdAt: Date.now() - 86400000 * 3,
+      },
+    ];
+
     this.saveTransactions(demoTxs, userId);
   }
 
@@ -221,13 +251,15 @@ export class StorageService {
     const profiles = this.getAllProfiles();
     const activeUser = this.getProfile();
     const transactions = this.getTransactions();
+    const recurring = this.getRecurringExpenses();
 
     const payload = {
-      version: '3.0.0',
+      version: '3.1.0',
       exportedAt: new Date().toISOString(),
       activeUser,
       profiles,
       transactions,
+      recurring,
     };
     return JSON.stringify(payload, null, 2);
   }
@@ -242,6 +274,9 @@ export class StorageService {
         }
         if (parsed.transactions && parsed.activeUser) {
           this.saveTransactions(parsed.transactions, parsed.activeUser.id);
+        }
+        if (parsed.recurring && parsed.activeUser) {
+          this.saveRecurringExpenses(parsed.recurring, parsed.activeUser.id);
         }
         return true;
       } else if (parsed.profile) {

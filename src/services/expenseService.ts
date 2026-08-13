@@ -1,7 +1,7 @@
 import { StorageService } from './storage';
 import { AuthService } from './authService';
 import { SupabaseService } from './supabaseClient';
-import type { Transaction, SummaryStats, CategoryDef, CategoryId } from '../types';
+import type { Transaction, SummaryStats, CategoryDef, CategoryId, RecurringExpense } from '../types';
 import { CATEGORIES } from '../types';
 
 export class ExpenseService {
@@ -95,6 +95,86 @@ export class ExpenseService {
     }
 
     return true;
+  }
+
+  // ------------------------------------------------------------------
+  // RECURRING EXPENSES & EMI COMMITMENTS
+  // ------------------------------------------------------------------
+  static getRecurringExpenses(): RecurringExpense[] {
+    return StorageService.getRecurringExpenses();
+  }
+
+  static addRecurringExpense(data: Omit<RecurringExpense, 'id' | 'createdAt'>): RecurringExpense {
+    const list = StorageService.getRecurringExpenses();
+    const profile = AuthService.getProfile();
+    const userId = profile ? profile.id : 'usr-default';
+
+    const newRec: RecurringExpense = {
+      ...data,
+      id: `rec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      userId,
+      createdAt: Date.now(),
+    };
+
+    list.unshift(newRec);
+    StorageService.saveRecurringExpenses(list);
+    return newRec;
+  }
+
+  static updateRecurringExpense(id: string, updates: Partial<Omit<RecurringExpense, 'id' | 'createdAt'>>): boolean {
+    const list = StorageService.getRecurringExpenses();
+    const index = list.findIndex(r => r.id === id);
+    if (index === -1) return false;
+
+    list[index] = { ...list[index], ...updates };
+    StorageService.saveRecurringExpenses(list);
+    return true;
+  }
+
+  static deleteRecurringExpense(id: string): boolean {
+    const list = StorageService.getRecurringExpenses();
+    const filtered = list.filter(r => r.id !== id);
+    if (filtered.length === list.length) return false;
+
+    StorageService.saveRecurringExpenses(filtered);
+    return true;
+  }
+
+  // 1-Click Post a Recurring EMI / Subscription into actual transactions
+  static postRecurringExpense(id: string, customDate?: string): Transaction | null {
+    const list = StorageService.getRecurringExpenses();
+    const rec = list.find(r => r.id === id);
+    if (!rec) return null;
+
+    const currentMonthStr = (customDate || new Date().toISOString()).slice(0, 7);
+    const postDate = customDate || `${currentMonthStr}-${String(rec.dueDateDay).padStart(2, '0')}`;
+
+    // Add actual transaction entry
+    const newTx = this.addTransaction({
+      title: rec.title,
+      amount: rec.amount,
+      type: 'expense',
+      categoryId: rec.categoryId,
+      subCategory: rec.subCategory,
+      date: postDate,
+      time: '09:00',
+      paymentMethod: rec.paymentMethod,
+      notes: rec.notes ? `[Recurring EMI/Bill] ${rec.notes}` : '[Recurring EMI/Bill]',
+    });
+
+    // Mark last processed month
+    rec.lastProcessedMonth = currentMonthStr;
+    StorageService.saveRecurringExpenses(list);
+
+    return newTx;
+  }
+
+  // Get active recurring commitments due for the current month that haven't been posted yet
+  static getDueRecurringExpenses(currentMonthStr?: string): RecurringExpense[] {
+    const monthStr = currentMonthStr || new Date().toISOString().slice(0, 7);
+    const all = this.getRecurringExpenses();
+
+    return all.filter(r => r.isActive && r.lastProcessedMonth !== monthStr);
   }
 
   static getMonthlySummary(monthYear?: string): SummaryStats {
