@@ -15,7 +15,10 @@ import {
   CloudLightning,
   RefreshCw,
   Copy,
-  Sparkles
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Lock
 } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { SUPPORTED_CURRENCIES } from '../types';
@@ -57,8 +60,9 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [supabaseUrl, setSupabaseUrl] = useState<string>(initialCreds.url);
   const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(initialCreds.anonKey);
   const [isTestingCloud, setIsTestingCloud] = useState<boolean>(false);
+  const [showDeveloperConfig, setShowDeveloperConfig] = useState<boolean>(false);
   const [cloudStatus, setCloudStatus] = useState<string>(
-    SupabaseService.isConfigured() ? 'Cloud database configured' : 'Using Local Storage'
+    SupabaseService.isConfigured() ? 'Cloud Database Connected' : 'Device Local Storage'
   );
 
   // Security PIN Modal
@@ -105,9 +109,9 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
 
     const isSaved = SupabaseService.saveCredentials(supabaseUrl, supabaseAnonKey);
     if (!isSaved) {
-      setCloudStatus('Cloud credentials cleared. Operating in local mode.');
+      setCloudStatus('Device Local Storage');
       setIsTestingCloud(false);
-      setMessage({ text: 'Cloud database disconnected. Using local storage.', type: 'success' });
+      setMessage({ text: 'Cloud database disconnected. Operating in local device mode.', type: 'success' });
       setTimeout(() => setMessage(null), 3000);
       return;
     }
@@ -116,9 +120,8 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
     setIsTestingCloud(false);
 
     if (test.success) {
-      setCloudStatus('🟢 Supabase Cloud Database Connected & Synced!');
-      setMessage({ text: 'Supabase Cloud Database connected successfully!', type: 'success' });
-      // Trigger initial cloud pull & push
+      setCloudStatus('🟢 Cloud Database Connected');
+      setMessage({ text: 'Cloud database connected successfully!', type: 'success' });
       await StorageService.pullCloudData();
       await SupabaseService.syncProfile(profile);
       onUpdateProfile();
@@ -172,16 +175,41 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   created_at BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS public.recurring_expenses (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  category_id TEXT NOT NULL,
+  sub_category TEXT,
+  frequency TEXT NOT NULL DEFAULT 'monthly',
+  due_date_day INTEGER NOT NULL DEFAULT 1,
+  start_date TEXT NOT NULL,
+  payment_method TEXT NOT NULL,
+  notes TEXT,
+  is_active BOOLEAN DEFAULT true,
+  last_processed_month TEXT,
+  created_at BIGINT NOT NULL
+);
+
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.recurring_expenses ENABLE ROW LEVEL SECURITY;
+
 CREATE POLICY "Allow anon read profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Allow anon insert profiles" ON public.profiles FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow anon update profiles" ON public.profiles FOR UPDATE USING (true);
 CREATE POLICY "Allow anon delete profiles" ON public.profiles FOR DELETE USING (true);
+
 CREATE POLICY "Allow anon read transactions" ON public.transactions FOR SELECT USING (true);
 CREATE POLICY "Allow anon insert transactions" ON public.transactions FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow anon update transactions" ON public.transactions FOR UPDATE USING (true);
-CREATE POLICY "Allow anon delete transactions" ON public.transactions FOR DELETE USING (true);`;
+CREATE POLICY "Allow anon delete transactions" ON public.transactions FOR DELETE USING (true);
+
+CREATE POLICY "Allow anon read recurring" ON public.recurring_expenses FOR SELECT USING (true);
+CREATE POLICY "Allow anon insert recurring" ON public.recurring_expenses FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow anon update recurring" ON public.recurring_expenses FOR UPDATE USING (true);
+CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DELETE USING (true);`;
 
     navigator.clipboard.writeText(sqlScript);
     setMessage({ text: 'Supabase SQL Setup Script copied to clipboard!', type: 'success' });
@@ -297,13 +325,13 @@ CREATE POLICY "Allow anon delete transactions" ON public.transactions FOR DELETE
         <div>
           <div className="flex items-center gap-2 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-1">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Cloud & System Configuration</span>
+            <span>Settings & Preferences</span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
-            <Cloud className="w-6 h-6 text-indigo-400" /> User Profile & Supabase Cloud Sync
+            <Cloud className="w-6 h-6 text-indigo-400" /> User Profile & Settings
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage profiles, 4-digit PIN security, Supabase cloud database sync, and categories.
+            Manage user profiles, 4-digit PIN security, custom categories, and data backups.
           </p>
         </div>
       </div>
@@ -323,82 +351,107 @@ CREATE POLICY "Allow anon delete transactions" ON public.transactions FOR DELETE
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Supabase Cloud Database Sync Card */}
-          <form onSubmit={handleSaveSupabaseConfig} className="glass-card p-6 sm:p-7 rounded-3xl space-y-5 border border-indigo-500/30">
+          {/* Clean Cloud Sync Status Card (Uncluttered) */}
+          <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <CloudLightning className="w-5 h-5 text-indigo-400" /> Supabase Cloud Database Sync
+                  <CloudLightning className="w-5 h-5 text-indigo-400" /> Cloud Database Status
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Sync all profiles & transactions across phone, laptop & web in real time.
+                  Automated sync status across all your logged-in devices.
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                <span
+                  className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
+                    SupabaseService.isConfigured()
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                      : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                >
                   {cloudStatus}
                 </span>
+
                 {SupabaseService.isConfigured() && (
                   <button
                     type="button"
                     onClick={handleSyncCloudNow}
                     disabled={isTestingCloud}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer flex items-center gap-1 text-xs font-semibold"
                     title="Sync Cloud Data Now"
                   >
-                    <RefreshCw className={`w-4 h-4 ${isTestingCloud ? 'animate-spin text-indigo-400' : ''}`} />
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingCloud ? 'animate-spin text-indigo-400' : ''}`} />
+                    Sync
                   </button>
                 )}
               </div>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Supabase Project URL
-                </label>
-                <input
-                  type="text"
-                  placeholder="https://xyzcompany.supabase.co"
-                  value={supabaseUrl}
-                  onChange={(e) => setSupabaseUrl(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Supabase Anon Key
-                </label>
-                <input
-                  type="password"
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
-                  value={supabaseAnonKey}
-                  onChange={(e) => setSupabaseAnonKey(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            {/* Collapsible Advanced Developer Config Toggle */}
+            <div className="pt-1">
               <button
                 type="button"
-                onClick={handleCopySqlScript}
-                className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-indigo-400 text-xs font-bold border border-slate-800 flex items-center gap-1.5 transition cursor-pointer"
+                onClick={() => setShowDeveloperConfig(!showDeveloperConfig)}
+                className="text-xs font-semibold text-slate-400 hover:text-indigo-400 flex items-center gap-1.5 cursor-pointer"
               >
-                <Copy className="w-3.5 h-3.5" /> Copy Supabase SQL Setup Script
+                <Lock className="w-3.5 h-3.5" />
+                <span>{showDeveloperConfig ? 'Hide Developer API Keys' : 'Advanced Developer Settings (Custom API Keys)'}</span>
+                {showDeveloperConfig ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>
 
-              <button
-                type="submit"
-                disabled={isTestingCloud}
-                className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition cursor-pointer flex items-center gap-2"
-              >
-                {isTestingCloud ? 'Connecting...' : 'Connect Cloud Database'}
-              </button>
+              {showDeveloperConfig && (
+                <form onSubmit={handleSaveSupabaseConfig} className="mt-4 p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-4">
+                  <span className="text-xs font-bold text-slate-300 block">Manual Supabase API Key Configuration</span>
+                  
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                      Supabase Project URL
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="https://xyzcompany.supabase.co"
+                      value={supabaseUrl}
+                      onChange={(e) => setSupabaseUrl(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                      Supabase Anon Public Key
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                      value={supabaseAnonKey}
+                      onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCopySqlScript}
+                      className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-indigo-400 text-xs font-bold border border-slate-800 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" /> Copy SQL Script
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={isTestingCloud}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs shadow-md transition cursor-pointer"
+                    >
+                      {isTestingCloud ? 'Testing...' : 'Save API Credentials'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
-          </form>
+          </div>
 
           {/* Custom Category & Sub-Category Manager */}
           <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-5">
@@ -681,20 +734,20 @@ CREATE POLICY "Allow anon delete transactions" ON public.transactions FOR DELETE
             <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold uppercase tracking-wider">
               <Smartphone className="w-4 h-4" /> Cloud & Mobile Info
             </div>
-            <h3 className="text-lg font-bold text-slate-100">Hybrid Cloud Engine ⚡</h3>
+            <h3 className="text-lg font-bold text-slate-100">Hybrid Storage Architecture ⚡</h3>
             
             <div className="space-y-3 text-xs leading-relaxed text-slate-300">
               <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
-                <span className="font-bold text-slate-200 block">☁️ Supabase Cloud Synchronization</span>
+                <span className="font-bold text-slate-200 block">🔒 Private Local Device Storage</span>
                 <p className="text-[11px] text-slate-400">
-                  Connect your free Supabase URL & Key above to sync all profiles & expenses across all your phones, laptops, and tablets automatically.
+                  By default, all your financial ledgers and profiles are kept 100% private inside your browser's persistent storage engine.
                 </p>
               </div>
 
               <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1">
-                <span className="font-bold text-slate-200 block">💾 Local Offline Cache</span>
+                <span className="font-bold text-slate-200 block">☁️ Optional Cloud Sync</span>
                 <p className="text-[11px] text-slate-400">
-                  Even when offline or in airplane mode, your data remains fully accessible and automatically syncs to the cloud when internet returns.
+                  Environment variables (`VITE_SUPABASE_URL`) or developer settings allow seamless multi-device real-time syncing.
                 </p>
               </div>
             </div>
