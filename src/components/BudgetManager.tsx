@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Wallet, Save, CheckCircle2, Sliders, Sparkles } from 'lucide-react';
 import type { UserProfile, CategoryId } from '../types';
-import { CATEGORIES } from '../types';
 import { AuthService } from '../services/authService';
 import { ExpenseService } from '../services/expenseService';
 
@@ -25,6 +24,9 @@ export const BudgetManager: React.FC<BudgetManagerProps> = ({ profile, onUpdateP
   const currentMonthYear = new Date().toISOString().slice(0, 7);
   const stats = ExpenseService.getMonthlySummary(currentMonthYear);
   const breakdown = ExpenseService.getCategoryBreakdown(currentMonthYear);
+
+  // Fetch ALL active categories (both default and custom categories created by user)
+  const activeExpenseCategories = AuthService.getCategories(profile).filter((c) => !c.isIncome);
 
   const handleSaveMonthlyBudget = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,7 +66,7 @@ export const BudgetManager: React.FC<BudgetManagerProps> = ({ profile, onUpdateP
             <Wallet className="w-6 h-6 text-indigo-400" /> Monthly Budget & Category Limits
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Set your target spending limits to stay on top of your financial health.
+            Set target spending limits for your overall budget and individual main & custom categories.
           </p>
         </div>
 
@@ -132,16 +134,16 @@ export const BudgetManager: React.FC<BudgetManagerProps> = ({ profile, onUpdateP
           <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
             <div>
               <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-indigo-400" /> Category-Specific Limits
+                <Sliders className="w-5 h-5 text-indigo-400" /> Category-Specific Limits ({activeExpenseCategories.length})
               </h3>
               <p className="text-xs text-slate-400">
-                Optionally set individual budget caps for specific categories.
+                Optionally set individual budget caps for all your default and newly created categories.
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {CATEGORIES.filter((c) => !c.isIncome).map((cat) => {
+            {activeExpenseCategories.map((cat) => {
               const catSpentItem = breakdown.find((b) => b.category.id === cat.id);
               const catSpent = catSpentItem ? catSpentItem.total : 0;
               const catLimitStr = categoryBudgets[cat.id] || '';
@@ -156,13 +158,20 @@ export const BudgetManager: React.FC<BudgetManagerProps> = ({ profile, onUpdateP
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div
-                        className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs"
+                        className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0"
                         style={{ backgroundColor: cat.bgColor, color: cat.color }}
                       >
                         🏷️
                       </div>
                       <div>
-                        <h4 className="text-xs font-bold text-slate-100">{cat.name}</h4>
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="text-xs font-bold text-slate-100">{cat.name}</h4>
+                          {cat.isCustom && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] bg-indigo-500/20 text-indigo-400 font-bold">
+                              Custom
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] text-slate-400">
                           Spent: {sym}{catSpent.toFixed(2)}
                         </span>

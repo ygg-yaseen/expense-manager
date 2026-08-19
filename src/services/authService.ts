@@ -1,6 +1,6 @@
 import { StorageService } from './storage';
 import type { UserProfile, CategoryDef } from '../types';
-import { SUPPORTED_CURRENCIES, DEFAULT_CATEGORIES, DEFAULT_PRESET_SUB_CATEGORIES } from '../types';
+import { DEFAULT_CATEGORIES, DEFAULT_PRESET_SUB_CATEGORIES, SUPPORTED_CURRENCIES } from '../types';
 
 export class AuthService {
   static hasProfile(): boolean {
@@ -19,11 +19,16 @@ export class AuthService {
     StorageService.setActiveUserId(userId);
   }
 
-  // Get active categories list (Default + Custom user categories)
-  static getCategories(userProfile?: UserProfile | null): CategoryDef[] {
+  // Get active categories list (Default + Custom user categories - Filtered for archived unless requested)
+  static getCategories(userProfile?: UserProfile | null, includeArchived = false): CategoryDef[] {
     const profile = userProfile || this.getProfile();
     const custom = profile?.customCategories || [];
-    return [...DEFAULT_CATEGORIES, ...custom];
+    const archivedIds = new Set(profile?.archivedCategoryIds || []);
+
+    const all = [...DEFAULT_CATEGORIES, ...custom];
+    if (includeArchived) return all;
+
+    return all.filter((c) => !c.isArchived && !archivedIds.has(c.id));
   }
 
   // Get sub-categories for a given category ID (Default + Custom user sub-categories)
@@ -56,6 +61,37 @@ export class AuthService {
     return newCategory;
   }
 
+  // Delete or Archive a Category
+  static deleteCategory(categoryId: string): boolean {
+    const profile = this.getProfile();
+    if (!profile) return false;
+
+    const custom = profile.customCategories || [];
+    const isCustom = custom.some((c) => c.id === categoryId);
+
+    if (isCustom) {
+      // Remove custom category directly
+      const updatedCustom = custom.filter((c) => c.id !== categoryId);
+      this.updateProfile({ customCategories: updatedCustom });
+    } else {
+      // Archive default category
+      const archivedIds = Array.from(new Set([...(profile.archivedCategoryIds || []), categoryId]));
+      this.updateProfile({ archivedCategoryIds: archivedIds });
+    }
+
+    return true;
+  }
+
+  // Restore an archived Category
+  static restoreCategory(categoryId: string): boolean {
+    const profile = this.getProfile();
+    if (!profile) return false;
+
+    const archivedIds = (profile.archivedCategoryIds || []).filter((id) => id !== categoryId);
+    this.updateProfile({ archivedCategoryIds: archivedIds });
+    return true;
+  }
+
   // Add a new custom Sub-Category to active user profile
   static addSubCategory(categoryId: string, subCategoryName: string): string[] {
     const profile = this.getProfile();
@@ -75,15 +111,29 @@ export class AuthService {
     return this.getSubCategories(categoryId);
   }
 
+  // Delete a Sub-Category / Tag
+  static deleteSubCategory(categoryId: string, subCategoryName: string): string[] {
+    const profile = this.getProfile();
+    if (!profile) return [];
+
+    const customSubMap = { ...(profile.customSubCategories || {}) };
+    const currentList = customSubMap[categoryId] || [];
+
+    customSubMap[categoryId] = currentList.filter((item) => item !== subCategoryName);
+    this.updateProfile({ customSubCategories: customSubMap });
+
+    return this.getSubCategories(categoryId);
+  }
+
   // Verify PIN for current profile or specified user profile
   static verifyPin(inputPin: string, userId?: string): boolean {
     const profiles = this.getAllProfiles();
-    const target = userId ? profiles.find((p) => p.id === userId) : this.getProfile();
-    if (!target) return false;
-    return target.pin === inputPin;
+    const profile = userId ? profiles.find((p) => p.id === userId) : this.getProfile();
+    if (!profile) return false;
+    return profile.pin === inputPin;
   }
 
-  // Create new user profile (Multi-user)
+  // Create initial profile
   static createProfile(params: {
     name: string;
     pin: string;
@@ -92,10 +142,9 @@ export class AuthService {
     avatarColor?: string;
     includeDemoData?: boolean;
   }): UserProfile {
-    const currency = SUPPORTED_CURRENCIES.find(c => c.code === params.currencyCode) || SUPPORTED_CURRENCIES[0];
-    
+    const currency = SUPPORTED_CURRENCIES.find((c) => c.code === params.currencyCode) || SUPPORTED_CURRENCIES[0];
     const newProfile: UserProfile = {
-      id: `usr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: `usr-${Date.now()}`,
       name: params.name.trim(),
       pin: params.pin,
       currency,
@@ -104,6 +153,7 @@ export class AuthService {
       categoryBudgets: [],
       customCategories: [],
       customSubCategories: {},
+      archivedCategoryIds: [],
       autoLockMinutes: 0,
       isDarkMode: true,
       createdAt: Date.now(),

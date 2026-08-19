@@ -27,6 +27,7 @@ export interface CategoryDef {
   bgColor: string;
   isIncome?: boolean;
   isCustom?: boolean;
+  isArchived?: boolean;
 }
 
 export const DEFAULT_CATEGORIES: CategoryDef[] = [
@@ -101,6 +102,7 @@ export interface UserProfile {
   categoryBudgets: CategoryBudget[];
   customCategories?: CategoryDef[];
   customSubCategories?: Record<string, string[]>;
+  archivedCategoryIds?: string[];
   autoLockMinutes: number;
   isDarkMode: boolean;
   createdAt: number;

@@ -18,7 +18,10 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
-  Lock
+  Lock,
+  Archive,
+  RotateCcw,
+  X
 } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { SUPPORTED_CURRENCIES } from '../types';
@@ -77,11 +80,14 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [newCatName, setNewCatName] = useState<string>('');
   const [newSubCatName, setNewSubCatName] = useState<string>('');
   const [selectedCatForSub, setSelectedCatForSub] = useState<string>('travel');
+  const [showArchivedCategories, setShowArchivedCategories] = useState<boolean>(false);
 
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const allProfiles = AuthService.getAllProfiles();
-  const allCategories = AuthService.getCategories(profile);
+  const activeCategories = AuthService.getCategories(profile, false);
+  const allCategoriesIncludingArchived = AuthService.getCategories(profile, true);
+  const archivedCategories = allCategoriesIncludingArchived.filter(c => !activeCategories.some(a => a.id === c.id));
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,7 +230,24 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
     setNewCatName('');
     setShowAddCatModal(false);
     onUpdateProfile();
-    setMessage({ text: 'Custom main category created!', type: 'success' });
+    setMessage({ text: 'Custom category created & added to budget section!', type: 'success' });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleDeleteOrArchiveCategory = (catId: string, catName: string, isCustom?: boolean) => {
+    const actionText = isCustom ? 'delete custom category' : 'archive category';
+    if (window.confirm(`Are you sure you want to ${actionText} "${catName}"?`)) {
+      AuthService.deleteCategory(catId);
+      onUpdateProfile();
+      setMessage({ text: `Category "${catName}" ${isCustom ? 'deleted' : 'archived'}.`, type: 'success' });
+      setTimeout(() => setMessage(null), 3000);
+    }
+  };
+
+  const handleRestoreCategory = (catId: string, catName: string) => {
+    AuthService.restoreCategory(catId);
+    onUpdateProfile();
+    setMessage({ text: `Restored category "${catName}".`, type: 'success' });
     setTimeout(() => setMessage(null), 3000);
   };
 
@@ -236,6 +259,13 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
     setNewSubCatName('');
     onUpdateProfile();
     setMessage({ text: 'Custom sub-category added!', type: 'success' });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleDeleteSubCategoryTag = (catId: string, subName: string) => {
+    AuthService.deleteSubCategory(catId, subName);
+    onUpdateProfile();
+    setMessage({ text: `Removed tag "${subName}".`, type: 'success' });
     setTimeout(() => setMessage(null), 3000);
   };
 
@@ -328,10 +358,10 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
             <span>Settings & Preferences</span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
-            <Cloud className="w-6 h-6 text-indigo-400" /> User Profile & Settings
+            <Cloud className="w-6 h-6 text-indigo-400" /> User Profile & Category Manager
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage user profiles, 4-digit PIN security, custom categories, and data backups.
+            Manage profiles, 4-digit PIN security, custom categories, archiving, and data backups.
           </p>
         </div>
       </div>
@@ -351,6 +381,148 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Custom Category & Sub-Category Manager (With Delete / Archive options) */}
+          <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                  <Tag className="w-5 h-5 text-indigo-400" /> Categories & Sub-Categories Manager
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Create, edit, archive, or delete categories (auto-syncs to Budget section)
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowAddCatModal(true)}
+                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> Create Category
+              </button>
+            </div>
+
+            {/* Quick Add Sub-category form */}
+            <form onSubmit={handleCreateSubCategory} className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <span className="text-xs font-bold text-slate-300 block">Add New Sub-Category / Location Tag</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select
+                  value={selectedCatForSub}
+                  onChange={(e) => setSelectedCatForSub(e.target.value)}
+                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  {activeCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="text"
+                  placeholder="e.g. Ooty-Aug, Goa 2026"
+                  value={newSubCatName}
+                  onChange={(e) => setNewSubCatName(e.target.value)}
+                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                />
+
+                <button
+                  type="submit"
+                  disabled={!newSubCatName.trim()}
+                  className="py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
+                >
+                  Add Tag
+                </button>
+              </div>
+            </form>
+
+            {/* List of Active Categories with Delete/Archive option */}
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+              {activeCategories.map((cat) => {
+                const subs = AuthService.getSubCategories(cat.id, profile);
+                return (
+                  <div key={cat.id} className="p-3.5 rounded-2xl bg-slate-950/40 border border-slate-800/60 text-xs space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                        <span className="font-bold text-slate-200">{cat.name}</span>
+                        {cat.isCustom && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/20 text-indigo-400 font-bold">
+                            Custom
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400">{subs.length} tags</span>
+                        
+                        {/* Delete/Archive Category Button */}
+                        <button
+                          onClick={() => handleDeleteOrArchiveCategory(cat.id, cat.name, cat.isCustom)}
+                          className="p-1.5 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition cursor-pointer"
+                          title={cat.isCustom ? 'Delete Custom Category' : 'Archive Category'}
+                        >
+                          {cat.isCustom ? <Trash2 className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {subs.map((sub) => (
+                        <span
+                          key={sub}
+                          className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5 group"
+                        >
+                          📍 {sub}
+                          <button
+                            onClick={() => handleDeleteSubCategoryTag(cat.id, sub)}
+                            className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                            title="Remove tag"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Archived Categories Section */}
+            {archivedCategories.length > 0 && (
+              <div className="border-t border-slate-800 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowArchivedCategories(!showArchivedCategories)}
+                  className="text-xs font-semibold text-slate-400 hover:text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Archive className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Archived Categories ({archivedCategories.length})</span>
+                  {showArchivedCategories ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+
+                {showArchivedCategories && (
+                  <div className="mt-3 space-y-2">
+                    {archivedCategories.map((cat) => (
+                      <div key={cat.id} className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
+                          <span className="text-slate-400 line-through">{cat.name}</span>
+                        </div>
+                        <button
+                          onClick={() => handleRestoreCategory(cat.id, cat.name)}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 text-xs font-bold border border-indigo-500/30 flex items-center gap-1 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Restore
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Clean Cloud Sync Status Card (Uncluttered) */}
           <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
@@ -450,92 +622,6 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
                   </div>
                 </form>
               )}
-            </div>
-          </div>
-
-          {/* Custom Category & Sub-Category Manager */}
-          <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <Tag className="w-5 h-5 text-indigo-400" /> Categories & Sub-Categories Manager
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Create custom categories and trip tags (e.g. Ooty-Aug)
-                </p>
-              </div>
-
-              <button
-                onClick={() => setShowAddCatModal(true)}
-                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4 text-indigo-400" /> Add Category
-              </button>
-            </div>
-
-            {/* Quick Add Sub-category form */}
-            <form onSubmit={handleCreateSubCategory} className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
-              <span className="text-xs font-bold text-slate-300 block">Add New Sub-Category / Location Tag</span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <select
-                  value={selectedCatForSub}
-                  onChange={(e) => setSelectedCatForSub(e.target.value)}
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-indigo-500 cursor-pointer"
-                >
-                  {allCategories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-
-                <input
-                  type="text"
-                  placeholder="e.g. Ooty-Aug, Goa 2026"
-                  value={newSubCatName}
-                  onChange={(e) => setNewSubCatName(e.target.value)}
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
-                />
-
-                <button
-                  type="submit"
-                  disabled={!newSubCatName.trim()}
-                  className="py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
-                >
-                  Add Tag
-                </button>
-              </div>
-            </form>
-
-            {/* List of Categories & their subcategories */}
-            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-              {allCategories.map((cat) => {
-                const subs = AuthService.getSubCategories(cat.id, profile);
-                return (
-                  <div key={cat.id} className="p-3 rounded-2xl bg-slate-950/40 border border-slate-800/60 text-xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
-                        <span className="font-bold text-slate-200">{cat.name}</span>
-                        {cat.isCustom && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/20 text-indigo-400 font-bold">
-                            Custom
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[10px] text-slate-400">{subs.length} sub-categories</span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5">
-                      {subs.map((sub) => (
-                        <span key={sub} className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300">
-                          📍 {sub}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>
 
