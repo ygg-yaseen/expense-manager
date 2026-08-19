@@ -19,16 +19,32 @@ export class AuthService {
     StorageService.setActiveUserId(userId);
   }
 
-  // Get active categories list (Default + Custom user categories - Filtered for archived unless requested)
+  // Get active categories list (Default + Custom user categories with name/color overrides)
   static getCategories(userProfile?: UserProfile | null, includeArchived = false): CategoryDef[] {
     const profile = userProfile || this.getProfile();
     const custom = profile?.customCategories || [];
     const archivedIds = new Set(profile?.archivedCategoryIds || []);
+    const overrides = profile?.categoryOverrides || {};
 
-    const all = [...DEFAULT_CATEGORIES, ...custom];
-    if (includeArchived) return all;
+    const rawList = [...DEFAULT_CATEGORIES, ...custom];
+    
+    // Apply name & color overrides if edited by user
+    const list = rawList.map((cat) => {
+      const override = overrides[cat.id];
+      if (override) {
+        return {
+          ...cat,
+          name: override.name || cat.name,
+          color: override.color || cat.color,
+          bgColor: override.bgColor || cat.bgColor,
+        };
+      }
+      return cat;
+    });
 
-    return all.filter((c) => !c.isArchived && !archivedIds.has(c.id));
+    if (includeArchived) return list;
+
+    return list.filter((c) => !c.isArchived && !archivedIds.has(c.id));
   }
 
   // Get sub-categories for a given category ID (Default + Custom user sub-categories)
@@ -59,6 +75,43 @@ export class AuthService {
     const updatedCustom = [...(profile.customCategories || []), newCategory];
     this.updateProfile({ customCategories: updatedCustom });
     return newCategory;
+  }
+
+  // Edit Category Name & Color
+  static editCategory(categoryId: string, updates: { name: string; color?: string }): boolean {
+    const profile = this.getProfile();
+    if (!profile) return false;
+
+    const trimmedName = updates.name.trim();
+    if (!trimmedName) return false;
+
+    const custom = profile.customCategories || [];
+    const isCustom = custom.some((c) => c.id === categoryId);
+
+    if (isCustom) {
+      // Update custom category directly
+      const updatedCustom = custom.map((c) => {
+        if (c.id === categoryId) {
+          return {
+            ...c,
+            name: trimmedName,
+            color: updates.color || c.color,
+          };
+        }
+        return c;
+      });
+      this.updateProfile({ customCategories: updatedCustom });
+    } else {
+      // Update default category via user overrides
+      const overrides = { ...(profile.categoryOverrides || {}) };
+      overrides[categoryId] = {
+        name: trimmedName,
+        color: updates.color,
+      };
+      this.updateProfile({ categoryOverrides: overrides });
+    }
+
+    return true;
   }
 
   // Delete or Archive a Category
@@ -154,6 +207,7 @@ export class AuthService {
       customCategories: [],
       customSubCategories: {},
       archivedCategoryIds: [],
+      categoryOverrides: {},
       autoLockMinutes: 0,
       isDarkMode: true,
       createdAt: Date.now(),

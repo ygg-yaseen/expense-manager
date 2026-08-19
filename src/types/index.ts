@@ -103,6 +103,7 @@ export interface UserProfile {
   customCategories?: CategoryDef[];
   customSubCategories?: Record<string, string[]>;
   archivedCategoryIds?: string[];
+  categoryOverrides?: Record<string, { name?: string; color?: string; bgColor?: string }>;
   autoLockMinutes: number;
   isDarkMode: boolean;
   createdAt: number;

@@ -21,9 +21,10 @@ import {
   Lock,
   Archive,
   RotateCcw,
-  X
+  X,
+  Edit3
 } from 'lucide-react';
-import type { UserProfile } from '../types';
+import type { UserProfile, CategoryDef } from '../types';
 import { SUPPORTED_CURRENCIES } from '../types';
 import { AuthService } from '../services/authService';
 import { StorageService } from '../services/storage';
@@ -45,6 +46,19 @@ const AVATAR_COLORS = [
   '#f59e0b',
   '#8b5cf6',
   '#06b6d4',
+];
+
+const CATEGORY_COLORS = [
+  '#6366f1',
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#ec4899',
+  '#8b5cf6',
+  '#06b6d4',
+  '#f43f5e',
+  '#14b8a6',
+  '#a855f7',
 ];
 
 export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
@@ -81,6 +95,11 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [newSubCatName, setNewSubCatName] = useState<string>('');
   const [selectedCatForSub, setSelectedCatForSub] = useState<string>('travel');
   const [showArchivedCategories, setShowArchivedCategories] = useState<boolean>(false);
+
+  // Edit Category Modal State
+  const [editingCategory, setEditingCategory] = useState<CategoryDef | null>(null);
+  const [editCatName, setEditCatName] = useState<string>('');
+  const [editCatColor, setEditCatColor] = useState<string>('#6366f1');
 
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -234,6 +253,27 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
     setTimeout(() => setMessage(null), 3000);
   };
 
+  const handleOpenEditCategory = (cat: CategoryDef) => {
+    setEditingCategory(cat);
+    setEditCatName(cat.name);
+    setEditCatColor(cat.color || '#6366f1');
+  };
+
+  const handleSaveEditCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCategory || !editCatName.trim()) return;
+
+    AuthService.editCategory(editingCategory.id, {
+      name: editCatName.trim(),
+      color: editCatColor,
+    });
+
+    setEditingCategory(null);
+    onUpdateProfile();
+    setMessage({ text: 'Category name & theme updated successfully!', type: 'success' });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
   const handleDeleteOrArchiveCategory = (catId: string, catName: string, isCustom?: boolean) => {
     const actionText = isCustom ? 'delete custom category' : 'archive category';
     if (window.confirm(`Are you sure you want to ${actionText} "${catName}"?`)) {
@@ -361,7 +401,7 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
             <Cloud className="w-6 h-6 text-indigo-400" /> User Profile & Category Manager
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage profiles, 4-digit PIN security, custom categories, archiving, and data backups.
+            Manage profiles, 4-digit PIN security, custom categories, editing, archiving, and data backups.
           </p>
         </div>
       </div>
@@ -381,7 +421,7 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Custom Category & Sub-Category Manager (With Delete / Archive options) */}
+          {/* Custom Category & Sub-Category Manager (With Edit, Delete, Archive options) */}
           <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
@@ -389,7 +429,7 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
                   <Tag className="w-5 h-5 text-indigo-400" /> Categories & Sub-Categories Manager
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Create, edit, archive, or delete categories (auto-syncs to Budget section)
+                  Create, edit category names, archive, or delete categories (auto-syncs to Budget section)
                 </p>
               </div>
 
@@ -435,7 +475,7 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
               </div>
             </form>
 
-            {/* List of Active Categories with Delete/Archive option */}
+            {/* List of Active Categories with Edit / Delete / Archive options */}
             <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
               {activeCategories.map((cat) => {
                 const subs = AuthService.getSubCategories(cat.id, profile);
@@ -452,8 +492,17 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-slate-400">{subs.length} tags</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-slate-400 mr-1">{subs.length} tags</span>
+
+                        {/* Edit Category Name Button */}
+                        <button
+                          onClick={() => handleOpenEditCategory(cat)}
+                          className="p-1.5 rounded-lg hover:bg-indigo-600/20 text-slate-400 hover:text-indigo-400 transition cursor-pointer"
+                          title="Edit Category Name & Color"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
                         
                         {/* Delete/Archive Category Button */}
                         <button
@@ -886,6 +935,69 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
         </div>
       )}
 
+      {/* Edit Category Modal */}
+      {editingCategory && (
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveEditCategory}
+            className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4"
+          >
+            <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Edit3 className="w-4 h-4 text-indigo-400" /> Edit Category Name
+            </h4>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                Category Name
+              </label>
+              <input
+                type="text"
+                value={editCatName}
+                onChange={(e) => setEditCatName(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                Theme Color
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORY_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setEditCatColor(color)}
+                    style={{ backgroundColor: color }}
+                    className={`w-6 h-6 rounded-full transition cursor-pointer ${
+                      editCatColor === color ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900' : 'opacity-70'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingCategory(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!editCatName.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+              >
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Change PIN Modal */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
@@ -945,7 +1057,7 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setShowPinModal(false)}
+                onClick={() => setEditingCategory(null)}
                 className="flex-1 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
               >
                 Cancel
