@@ -31,7 +31,7 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
   profile,
 }) => {
   const [file, setFile] = useState<File | null>(null);
-  const [fileArrayBuffer, setFileArrayBuffer] = useState<ArrayBuffer | null>(null);
+  const [fileBytes, setFileBytes] = useState<Uint8Array | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [password, setPassword] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -66,17 +66,23 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
         return;
       }
 
-      setFileArrayBuffer(buffer);
-      await analyzePDF(buffer, '');
+      // Convert to persistent Uint8Array byte copy
+      const bytes = new Uint8Array(buffer.slice(0));
+      setFileBytes(bytes);
+      await analyzePDF(bytes, '');
     };
     reader.readAsArrayBuffer(selectedFile);
   };
 
-  const analyzePDF = async (buffer: ArrayBuffer, pass: string) => {
+  const analyzePDF = async (bytes: Uint8Array, pass: string) => {
     setIsAnalyzing(true);
     setErrorMsg('');
 
-    const res = await StatementParserService.parsePDF(buffer, pass);
+    // Pass a fresh byte slice to guarantee PDF.js worker can never detach state bytes
+    const freshBytes = new Uint8Array(bytes.length);
+    freshBytes.set(bytes);
+
+    const res = await StatementParserService.parsePDF(freshBytes, pass);
     setIsAnalyzing(false);
 
     if (res.isPasswordProtected) {
@@ -101,8 +107,8 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password.trim() || !fileArrayBuffer) return;
-    analyzePDF(fileArrayBuffer, password.trim());
+    if (!password.trim() || !fileBytes) return;
+    analyzePDF(fileBytes, password.trim());
   };
 
   const handleToggleSelectAll = (checked: boolean) => {

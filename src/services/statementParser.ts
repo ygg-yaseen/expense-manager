@@ -33,14 +33,22 @@ export class StatementParserService {
    * Main function to read PDF file ArrayBuffer with optional password
    */
   static async parsePDF(
-    arrayBuffer: ArrayBuffer,
+    inputData: Uint8Array | ArrayBuffer,
     password?: string
   ): Promise<StatementParseResult> {
     try {
-      // Clone buffer to prevent ArrayBuffer detachment across password retry attempts
-      const bufferCopy = arrayBuffer.slice(0);
+      // Create a fresh byte copy to guarantee ArrayBuffer is never detached across retries
+      let byteCopy: Uint8Array;
+      if (inputData instanceof Uint8Array) {
+        byteCopy = new Uint8Array(inputData.length);
+        byteCopy.set(inputData);
+      } else {
+        const slice = inputData.slice(0);
+        byteCopy = new Uint8Array(slice);
+      }
+
       const loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(bufferCopy),
+        data: byteCopy,
         password: password || '',
       });
 
