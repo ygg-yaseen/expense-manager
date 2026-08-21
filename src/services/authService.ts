@@ -1,6 +1,6 @@
 import { StorageService } from './storage';
 import type { UserProfile, CategoryDef } from '../types';
-import { DEFAULT_CATEGORIES, DEFAULT_PRESET_SUB_CATEGORIES, SUPPORTED_CURRENCIES } from '../types';
+import { DEFAULT_CATEGORIES, DEFAULT_PRESET_SUB_CATEGORIES, SUPPORTED_CURRENCIES, DEFAULT_PAYMENT_METHODS } from '../types';
 
 export class AuthService {
   static hasProfile(): boolean {
@@ -55,6 +55,42 @@ export class AuthService {
     
     // Combine & remove duplicates
     return Array.from(new Set([...defaultSubs, ...customSubs]));
+  }
+
+  // Get active Payment Methods (Default + Custom user payment methods)
+  static getPaymentMethods(userProfile?: UserProfile | null): string[] {
+    const profile = userProfile || this.getProfile();
+    const custom = profile?.customPaymentMethods || [];
+    return Array.from(new Set([...DEFAULT_PAYMENT_METHODS, ...custom]));
+  }
+
+  // Add a new custom Payment Method
+  static addPaymentMethod(methodName: string): string[] {
+    const profile = this.getProfile();
+    if (!profile) return [];
+
+    const trimmed = methodName.trim();
+    if (!trimmed) return this.getPaymentMethods(profile);
+
+    const current = profile.customPaymentMethods || [];
+    if (!current.includes(trimmed)) {
+      const updated = [...current, trimmed];
+      this.updateProfile({ customPaymentMethods: updated });
+    }
+
+    return this.getPaymentMethods();
+  }
+
+  // Delete a custom Payment Method
+  static deletePaymentMethod(methodName: string): string[] {
+    const profile = this.getProfile();
+    if (!profile) return [];
+
+    const current = profile.customPaymentMethods || [];
+    const updated = current.filter((m) => m !== methodName);
+    this.updateProfile({ customPaymentMethods: updated });
+
+    return this.getPaymentMethods();
   }
 
   // Add a new custom Category to active user profile

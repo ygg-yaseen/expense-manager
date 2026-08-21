@@ -50,7 +50,8 @@ export const CATEGORIES = DEFAULT_CATEGORIES;
 export const DEFAULT_PRESET_SUB_CATEGORIES: Record<string, string[]> = {};
 export const PRESET_SUB_CATEGORIES = DEFAULT_PRESET_SUB_CATEGORIES;
 
-export type PaymentMethod = 'Cash' | 'Credit Card' | 'Debit Card' | 'UPI/Mobile Wallet' | 'Bank Transfer';
+export type PaymentMethod = 'Cash' | 'Credit Card' | 'Debit Card' | 'UPI/Mobile Wallet' | 'Bank Transfer' | string;
+export const DEFAULT_PAYMENT_METHODS: string[] = ['Credit Card', 'Debit Card', 'UPI/Mobile Wallet', 'Cash', 'Bank Transfer'];
 
 export interface Transaction {
   id: string;
@@ -104,6 +105,7 @@ export interface UserProfile {
   customSubCategories?: Record<string, string[]>;
   archivedCategoryIds?: string[];
   categoryOverrides?: Record<string, { name?: string; color?: string; bgColor?: string }>;
+  customPaymentMethods?: string[];
   autoLockMinutes: number;
   isDarkMode: boolean;
   createdAt: number;

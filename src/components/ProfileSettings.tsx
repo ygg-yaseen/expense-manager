@@ -22,7 +22,8 @@ import {
   Archive,
   RotateCcw,
   X,
-  Edit3
+  Edit3,
+  CreditCard
 } from 'lucide-react';
 import type { UserProfile, CategoryDef } from '../types';
 import { SUPPORTED_CURRENCIES } from '../types';
@@ -95,6 +96,10 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
   const [newSubCatName, setNewSubCatName] = useState<string>('');
   const [selectedCatForSub, setSelectedCatForSub] = useState<string>('travel');
   const [showArchivedCategories, setShowArchivedCategories] = useState<boolean>(false);
+
+  // Payment Methods Manager State
+  const [newPmName, setNewPmName] = useState<string>('');
+  const paymentMethods = AuthService.getPaymentMethods(profile);
 
   // Edit Category Modal State
   const [editingCategory, setEditingCategory] = useState<CategoryDef | null>(null);
@@ -307,6 +312,26 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
     onUpdateProfile();
     setMessage({ text: `Removed tag "${subName}".`, type: 'success' });
     setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleCreatePaymentMethod = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPmName.trim()) return;
+
+    AuthService.addPaymentMethod(newPmName.trim());
+    setNewPmName('');
+    onUpdateProfile();
+    setMessage({ text: 'Custom payment method added!', type: 'success' });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleDeletePaymentMethod = (pmName: string) => {
+    if (window.confirm(`Are you sure you want to delete payment method "${pmName}"?`)) {
+      AuthService.deletePaymentMethod(pmName);
+      onUpdateProfile();
+      setMessage({ text: `Payment method "${pmName}" deleted.`, type: 'success' });
+      setTimeout(() => setMessage(null), 3000);
+    }
   };
 
   const handleChangePin = (e: React.FormEvent) => {
@@ -570,6 +595,67 @@ CREATE POLICY "Allow anon delete recurring" ON public.recurring_expenses FOR DEL
                 )}
               </div>
             )}
+          </div>
+
+          {/* Custom Payment Methods Manager */}
+          <div className="glass-card p-6 sm:p-7 rounded-3xl space-y-5">
+            <div className="border-b border-slate-800 pb-3">
+              <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-indigo-400" /> Payment Methods & Custom Cards
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Add custom credit cards, debit cards, UPI apps, or bank accounts used for expenses & statement imports
+              </p>
+            </div>
+
+            {/* Quick Add Payment Method form */}
+            <form onSubmit={handleCreatePaymentMethod} className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <span className="text-xs font-bold text-slate-300 block">Add New Payment Method / Card Name</span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. HDFC Infinia, AMEX Gold, GPay"
+                  value={newPmName}
+                  onChange={(e) => setNewPmName(e.target.value)}
+                  className="flex-1 px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!newPmName.trim()}
+                  className="py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
+                >
+                  Add Method
+                </button>
+              </div>
+            </form>
+
+            {/* List of Active Payment Methods */}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {paymentMethods.map((pm) => {
+                const isCustom = !['Credit Card', 'Debit Card', 'UPI/Mobile Wallet', 'Cash', 'Bank Transfer'].includes(pm);
+                return (
+                  <span
+                    key={pm}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
+                      isCustom
+                        ? 'bg-indigo-600/10 border-indigo-500/30 text-indigo-300'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    💳 {pm}
+                    {isCustom && (
+                      <button
+                        onClick={() => handleDeletePaymentMethod(pm)}
+                        className="text-slate-400 hover:text-rose-400 cursor-pointer ml-1"
+                        title="Delete custom payment method"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
           </div>
 
           {/* Clean Cloud Sync Status Card (Uncluttered) */}

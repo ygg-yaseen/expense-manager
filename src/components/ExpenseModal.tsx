@@ -12,13 +12,7 @@ interface ExpenseModalProps {
   profile: UserProfile;
 }
 
-const PAYMENT_METHODS: PaymentMethod[] = [
-  'Cash',
-  'Credit Card',
-  'Debit Card',
-  'UPI/Mobile Wallet',
-  'Bank Transfer',
-];
+
 
 export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   isOpen,
@@ -44,6 +38,9 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const [showAddSubCatModal, setShowAddSubCatModal] = useState<boolean>(false);
   const [newSubCatName, setNewSubCatName] = useState<string>('');
 
+  const [showAddPaymentMethodModal, setShowAddPaymentMethodModal] = useState<boolean>(false);
+  const [newPaymentMethodName, setNewPaymentMethodName] = useState<string>('');
+
   // Custom Calendar Modal toggle
   const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
 
@@ -51,6 +48,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     type === 'income' ? c.isIncome : !c.isIncome
   );
   const subCategories = AuthService.getSubCategories(categoryId, profile);
+  const paymentMethods = AuthService.getPaymentMethods(profile);
 
   useEffect(() => {
     if (editingTransaction) {
@@ -329,14 +327,23 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                 </label>
                 <select
                   value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                  onChange={(e) => {
+                    if (e.target.value === '__add_new_pm__') {
+                      setShowAddPaymentMethodModal(true);
+                    } else {
+                      setPaymentMethod(e.target.value as PaymentMethod);
+                    }
+                  }}
                   className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-indigo-500 transition cursor-pointer"
                 >
-                  {PAYMENT_METHODS.map((pm) => (
+                  {paymentMethods.map((pm) => (
                     <option key={pm} value={pm}>
                       {pm}
                     </option>
                   ))}
+                  <option value="__add_new_pm__" className="text-indigo-400 font-bold">
+                    + Add New Payment Method...
+                  </option>
                 </select>
               </div>
             </div>
@@ -458,6 +465,59 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                   className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
                 >
                   Add Tag
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Add Custom Payment Method Modal */}
+        {showAddPaymentMethodModal && (
+          <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newPaymentMethodName.trim()) return;
+                const trimmed = newPaymentMethodName.trim();
+                AuthService.addPaymentMethod(trimmed);
+                setPaymentMethod(trimmed as PaymentMethod);
+                setNewPaymentMethodName('');
+                setShowAddPaymentMethodModal(false);
+              }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4"
+            >
+              <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Plus className="w-4 h-4 text-indigo-400" /> Add Custom Payment Method
+              </h4>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Payment Method / Card Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. HDFC Infinia, AMEX Gold, GPay"
+                  value={newPaymentMethodName}
+                  onChange={(e) => setNewPaymentMethodName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddPaymentMethodModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newPaymentMethodName.trim()}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+                >
+                  Add Method
                 </button>
               </div>
             </form>

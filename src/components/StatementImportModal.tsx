@@ -10,9 +10,11 @@ import {
   Sparkles, 
   CheckSquare, 
   Square,
-  ShieldCheck
+  ShieldCheck,
+  Plus,
+  CreditCard
 } from 'lucide-react';
-import type { UserProfile } from '../types';
+import type { UserProfile, PaymentMethod } from '../types';
 import { AuthService } from '../services/authService';
 import { ExpenseService } from '../services/expenseService';
 import { StatementParserService, type ExtractedStatementTx } from '../services/statementParser';
@@ -36,6 +38,11 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
   const [password, setPassword] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
+  // Payment Method Selection & Custom Creation State
+  const [globalPaymentMethod, setGlobalPaymentMethod] = useState<string>('Credit Card');
+  const [showAddPaymentMethodModal, setShowAddPaymentMethodModal] = useState<boolean>(false);
+  const [newPaymentMethodName, setNewPaymentMethodName] = useState<string>('');
+
   // Extracted Results State
   const [bankName, setBankName] = useState<string>('');
   const [extractedTxs, setExtractedTxs] = useState<ExtractedStatementTx[]>([]);
@@ -43,6 +50,7 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const categories = AuthService.getCategories(profile).filter((c) => !c.isIncome);
+  const paymentMethods = AuthService.getPaymentMethods(profile);
   const sym = profile.currency.symbol;
 
   if (!isOpen) return null;
@@ -100,8 +108,15 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
     }
 
     // Success -> Move to Review Step
-    setBankName(res.bankName || 'Credit Card Statement');
-    setExtractedTxs(res.transactions);
+    const detectedIssuer = res.bankName || 'Credit Card Statement';
+    setBankName(detectedIssuer);
+
+    // Default payment method preset to detected card or global selection
+    const defaultPm = paymentMethods.includes(detectedIssuer) ? detectedIssuer : globalPaymentMethod;
+    setGlobalPaymentMethod(defaultPm);
+
+    // Preset payment method on extracted items
+    setExtractedTxs(res.transactions.map((t) => ({ ...t, paymentMethod: defaultPm as PaymentMethod })));
     setStep('review');
   };
 
@@ -109,6 +124,29 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
     e.preventDefault();
     if (!password.trim() || !fileBytes) return;
     analyzePDF(fileBytes, password.trim());
+  };
+
+  const handleGlobalPaymentMethodChange = (pm: string) => {
+    if (pm === '__add_new_pm__') {
+      setShowAddPaymentMethodModal(true);
+      return;
+    }
+    setGlobalPaymentMethod(pm);
+    // Apply to all items
+    setExtractedTxs((prev) => prev.map((t) => ({ ...t, paymentMethod: pm as PaymentMethod })));
+  };
+
+  const handleCreateCustomPaymentMethod = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPaymentMethodName.trim()) return;
+
+    const trimmed = newPaymentMethodName.trim();
+    AuthService.addPaymentMethod(trimmed);
+    setGlobalPaymentMethod(trimmed);
+    setExtractedTxs((prev) => prev.map((t) => ({ ...t, paymentMethod: trimmed as PaymentMethod })));
+
+    setNewPaymentMethodName('');
+    setShowAddPaymentMethodModal(false);
   };
 
   const handleToggleSelectAll = (checked: boolean) => {
@@ -124,6 +162,16 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
   const handleCategoryChange = (id: string, categoryId: string) => {
     setExtractedTxs((prev) =>
       prev.map((t) => (t.id === id ? { ...t, categoryId } : t))
+    );
+  };
+
+  const handleTxPaymentMethodChange = (id: string, paymentMethod: PaymentMethod) => {
+    if ((paymentMethod as string) === '__add_new_pm__') {
+      setShowAddPaymentMethodModal(true);
+      return;
+    }
+    setExtractedTxs((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, paymentMethod } : t))
     );
   };
 
@@ -161,7 +209,7 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 w-full max-w-3xl shadow-2xl relative my-6">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 w-full max-w-4xl shadow-2xl relative my-6">
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
           <div>
@@ -214,7 +262,7 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
                   {file ? file.name : 'Upload Credit Card Statement (PDF)'}
                 </h4>
                 <p className="text-xs text-slate-400 mt-1">
-                  Supports HDFC, ICICI, SBI, Axis, AMEX, Axis, and all major bank PDF statements.
+                  Supports HDFC, ICICI, SBI, Axis, AMEX, and all major bank PDF statements.
                 </p>
               </div>
 
@@ -290,25 +338,62 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
         {/* STEP 3: REVIEW & CONFIRM EXTRACTED TRANSACTIONS */}
         {step === 'review' && (
           <div className="space-y-5">
-            {/* Statement Summary KPI */}
-            <div className="p-4 rounded-2xl bg-indigo-600/10 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div>
-                <span className="text-indigo-400 font-bold uppercase tracking-wider block text-[10px]">
-                  Detected Issuer
-                </span>
-                <span className="text-sm font-extrabold text-slate-100">{bankName}</span>
+            {/* Statement Summary & Payment Method Control Card */}
+            <div className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs border-b border-slate-800 pb-3">
+                <div>
+                  <span className="text-indigo-400 font-bold uppercase tracking-wider block text-[10px]">
+                    Detected Issuer
+                  </span>
+                  <span className="text-sm font-extrabold text-slate-100">{bankName}</span>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Found Items</span>
+                    <span className="font-bold text-slate-200">{extractedTxs.length} transactions</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Selected Total</span>
+                    <span className="font-extrabold text-indigo-300">
+                      {sym}{selectedTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex items-center gap-4">
-                <div>
-                  <span className="text-slate-400 block text-[10px]">Found Items</span>
-                  <span className="font-bold text-slate-200">{extractedTxs.length} transactions</span>
+              {/* Payment Method Selector & Add New Action */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <label className="text-xs font-bold text-slate-200">
+                    Set Payment Method for Import:
+                  </label>
                 </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px]">Selected Total</span>
-                  <span className="font-extrabold text-indigo-300">
-                    {sym}{selectedTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </span>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={globalPaymentMethod}
+                    onChange={(e) => handleGlobalPaymentMethodChange(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    {paymentMethods.map((pm) => (
+                      <option key={pm} value={pm}>
+                        💳 {pm}
+                      </option>
+                    ))}
+                    <option value="__add_new_pm__" className="text-indigo-400 font-bold">
+                      + Add New Payment Method...
+                    </option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAddPaymentMethodModal(true)}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Custom Card
+                  </button>
                 </div>
               </div>
             </div>
@@ -330,7 +415,7 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
                 </span>
               </button>
 
-              <span>Edit category or tag before importing</span>
+              <span>Customize category & payment method per row</span>
             </div>
 
             {/* Extracted Transactions List Table */}
@@ -358,14 +443,14 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
                     </button>
 
                     <div>
-                      <h5 className="text-xs font-bold text-slate-100 max-w-[220px] sm:max-w-xs truncate">
+                      <h5 className="text-xs font-bold text-slate-100 max-w-[200px] sm:max-w-xs truncate">
                         {tx.title}
                       </h5>
                       <span className="text-[10px] text-slate-400">{tx.date}</span>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-3">
+                  <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2">
                     {/* Category Selector */}
                     {tx.type === 'expense' && (
                       <select
@@ -381,8 +466,24 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
                       </select>
                     )}
 
+                    {/* Payment Method Selector */}
+                    <select
+                      value={tx.paymentMethod}
+                      onChange={(e) => handleTxPaymentMethodChange(tx.id, e.target.value as PaymentMethod)}
+                      className="px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-xl text-[11px] text-slate-200 font-medium focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      {paymentMethods.map((pm) => (
+                        <option key={pm} value={pm}>
+                          💳 {pm}
+                        </option>
+                      ))}
+                      <option value="__add_new_pm__" className="text-indigo-400 font-bold">
+                        + Add Custom Card...
+                      </option>
+                    </select>
+
                     <span
-                      className={`text-xs font-extrabold shrink-0 ${
+                      className={`text-xs font-extrabold shrink-0 ml-1 ${
                         tx.type === 'income' ? 'text-emerald-400' : 'text-slate-100'
                       }`}
                     >
@@ -417,6 +518,51 @@ export const StatementImportModal: React.FC<StatementImportModalProps> = ({
           </div>
         )}
       </div>
+
+      {/* Add Custom Payment Method Modal */}
+      {showAddPaymentMethodModal && (
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <form
+            onSubmit={handleCreateCustomPaymentMethod}
+            className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4"
+          >
+            <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Plus className="w-4 h-4 text-indigo-400" /> Add Custom Payment Method
+            </h4>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                Payment Method / Card Name
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. HDFC Infinia, AMEX Gold, GPay"
+                value={newPaymentMethodName}
+                onChange={(e) => setNewPaymentMethodName(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAddPaymentMethodModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!newPaymentMethodName.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+              >
+                Add Method
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };
