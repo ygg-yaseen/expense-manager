@@ -213,16 +213,16 @@ export class StatementParserService {
       let title = line
         .replace(dateMatch[0], '')
         .replace(lastAmountStr, '')
-        .replace(/[₹\$]|INR|cr|dr|credit|debit|completed|success/gi, '')
-        .replace(/[^\w\s\-\.\,\/]/gi, '')
-        .trim();
+        .replace(/(?:\bcr\b|\bdr\b|\bcredit\b|\bdebit\b|\bcompleted\b|\bsuccess\b|[₹\$]|INR)/gi, '')
+        .trim()
+        .replace(/\s+/g, ' ');
 
-      if (!title || title.length < 3) {
-        title = `UPI Payment ${parsedDate}`;
+      if (!title || title.length < 2) {
+        title = `Transaction ${parsedDate}`;
       }
 
-      if (title.length > 50) {
-        title = title.substring(0, 50).trim();
+      if (title.length > 120) {
+        title = title.substring(0, 120).trim();
       }
 
       const categoryId = this.autoCategorize(title, type);
@@ -280,13 +280,17 @@ export class StatementParserService {
           }) || windowLines[0];
 
           let cleanTitle = titleLine
-            .replace(/(?:paid to|payment to|received from|transfer to|debit|credit)/gi, '')
-            .replace(/[₹\$]|INR/gi, '')
-            .replace(/[^\w\s\-\.\,\/]/gi, '')
-            .trim();
+            .replace(/^(?:paid to|payment to|received from|transfer to)\s*/gi, '')
+            .replace(/(?:\bdebit\b|\bcredit\b|[₹\$]|INR)/gi, '')
+            .trim()
+            .replace(/\s+/g, ' ');
 
-          if (!cleanTitle || cleanTitle.length < 3) {
+          if (!cleanTitle || cleanTitle.length < 2) {
             cleanTitle = `GPay Payment ${parsedDate}`;
+          }
+
+          if (cleanTitle.length > 120) {
+            cleanTitle = cleanTitle.substring(0, 120).trim();
           }
 
           const isCredit = windowLower.includes('received from') || windowLower.includes('credit') || windowLower.includes('refund') || windowLower.includes('+');

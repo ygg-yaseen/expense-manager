@@ -62,12 +62,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile, onOpenAddExpense,
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-950/70 border border-slate-800 px-3 py-2 rounded-2xl text-xs text-slate-300 font-medium">
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="bg-slate-950/70 border border-slate-800 px-3.5 py-2 rounded-2xl text-xs text-slate-200 font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value={new Date().toISOString().slice(0, 7)}>Current Month</option>
+            <option value="all">🌐 All Time Overview</option>
+          </select>
+          <div className="flex items-center gap-1.5 bg-slate-950/70 border border-slate-800 px-3 py-2 rounded-2xl text-xs text-slate-300 font-medium">
             <Calendar className="w-4 h-4 text-indigo-400" />
             <input
               type="month"
-              value={selectedMonth}
+              value={selectedMonth === 'all' ? '' : selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
               className="bg-transparent text-slate-100 focus:outline-none cursor-pointer"
             />

@@ -2,7 +2,6 @@ import { StorageService } from './storage';
 import { AuthService } from './authService';
 import { SupabaseService } from './supabaseClient';
 import type { Transaction, SummaryStats, CategoryDef, CategoryId, RecurringExpense } from '../types';
-import { CATEGORIES } from '../types';
 
 export class ExpenseService {
   static getAll(): Transaction[] {
@@ -21,7 +20,7 @@ export class ExpenseService {
   }): Transaction[] {
     let list = this.getAll();
 
-    if (params.monthYear) {
+    if (params.monthYear && params.monthYear !== 'all') {
       list = list.filter(t => t.date.startsWith(params.monthYear!));
     }
 
@@ -259,7 +258,8 @@ export class ExpenseService {
     count: number;
   }> {
     const profile = AuthService.getProfile();
-    const allCats = AuthService.getCategories(profile);
+    // Include all categories (including archived & custom) for resolution
+    const allCats = AuthService.getCategories(profile, true);
     const targetMonthYear = monthYear || new Date().toISOString().slice(0, 7);
     const txs = this.filter({ monthYear: targetMonthYear, type: 'expense' });
 
@@ -267,16 +267,24 @@ export class ExpenseService {
     const map: Record<string, { total: number; count: number }> = {};
 
     txs.forEach(t => {
-      if (!map[t.categoryId]) {
-        map[t.categoryId] = { total: 0, count: 0 };
+      const catId = t.categoryId || 'other';
+      if (!map[catId]) {
+        map[catId] = { total: 0, count: 0 };
       }
-      map[t.categoryId].total += t.amount;
-      map[t.categoryId].count += 1;
+      map[catId].total += t.amount;
+      map[catId].count += 1;
     });
 
     return Object.entries(map)
       .map(([catId, data]) => {
-        const category = allCats.find(c => c.id === catId) || CATEGORIES[CATEGORIES.length - 1];
+        const found = allCats.find(c => c.id === catId);
+        const category: CategoryDef = found || {
+          id: catId,
+          name: catId === 'other' ? 'Other & General' : (catId.charAt(0).toUpperCase() + catId.slice(1)),
+          color: '#6366f1',
+          bgColor: 'rgba(99, 102, 241, 0.15)',
+        };
+
         return {
           category,
           total: data.total,
