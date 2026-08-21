@@ -30,7 +30,7 @@ export interface StatementParseResult {
 
 export class StatementParserService {
   /**
-   * Main function to read PDF file ArrayBuffer with optional password
+   * Main function to read PDF file with optional password and parse GPay/UPI/Bank statements
    */
   static async parsePDF(
     inputData: Uint8Array | ArrayBuffer,
@@ -82,11 +82,16 @@ export class StatementParserService {
         }
       }
 
-      // Detect Bank / Card Issuer
+      // Detect Bank / Issuer (GPay, PhonePe, Paytm, HDFC, ICICI, etc.)
       const bankName = this.detectBank(fullTextLines);
 
-      // Parse transaction rows
-      const extracted = this.extractTransactions(fullTextLines);
+      // Default payment method for detected issuer
+      const defaultPaymentMethod = bankName.toLowerCase().includes('google pay') || bankName.toLowerCase().includes('gpay') || bankName.toLowerCase().includes('upi')
+        ? 'UPI/Mobile Wallet'
+        : 'Credit Card';
+
+      // Parse transaction rows with multi-pass strategy (Single-line + GPay multi-line blocks)
+      const extracted = this.extractTransactions(fullTextLines, defaultPaymentMethod);
 
       const totalSpent = extracted
         .filter((t) => t.type === 'expense')
@@ -135,10 +140,14 @@ export class StatementParserService {
   }
 
   /**
-   * Bank Issuer Detector
+   * Bank / App Issuer Detector
    */
   private static detectBank(lines: string[]): string {
     const text = lines.join(' ').toLowerCase();
+    if (text.includes('google pay') || text.includes('gpay') || text.includes('google llc')) return 'Google Pay (UPI)';
+    if (text.includes('phonepe')) return 'PhonePe (UPI)';
+    if (text.includes('paytm')) return 'Paytm (UPI)';
+    if (text.includes('bhim') || text.includes('upi transaction')) return 'UPI Statement';
     if (text.includes('hdfc')) return 'HDFC Credit Card';
     if (text.includes('icici')) return 'ICICI Bank Credit Card';
     if (text.includes('sbi')) return 'SBI Card';
@@ -148,21 +157,25 @@ export class StatementParserService {
     if (text.includes('indusind')) return 'IndusInd Card';
     if (text.includes('rbl')) return 'RBL Bank Card';
     if (text.includes('onecard')) return 'OneCard Credit Card';
-    return 'Credit Card Statement';
+    return 'Bank / Payment Statement';
   }
 
   /**
-   * Extract Transactions from lines of PDF text
+   * Multi-Pass Transaction Extraction Engine
    */
-  private static extractTransactions(lines: string[]): ExtractedStatementTx[] {
+  private static extractTransactions(lines: string[], defaultPm: PaymentMethod): ExtractedStatementTx[] {
     const results: ExtractedStatementTx[] = [];
-
-    // Date Pattern RegExes (e.g. DD/MM/YYYY, DD-MM-YYYY, DD MMM YYYY, DD/MM/YY)
-    const dateRegex = /(\d{1,2}[\/\-\.](?:\d{1,2}|[A-Za-z]{3})[\/\-\.]\d{2,4})|(\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})|(\d{1,2}\s+[A-Za-z]{3})/i;
     const currentYear = new Date().getFullYear();
 
+    // RegEx patterns
+    // Matches dates like: 15 Aug 2026, Aug 15, 2026, 15/08/2026, 15-08-2026, 2026-08-15
+    const dateRegex = /(\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b)|(\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b)|(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,\s*\d{2,4}\b)|(\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{2,4})?\b)/i;
+    
+    // Matches Currency Amounts like: ₹450.00, ₹ 1,299.50, INR 500, $45.00, 1,250.00
+    const currencyAmountRegex = /(?:₹|INR|\$|AED|EUR|£)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/g;
+
+    // --- PASS 1: Single Line Extractor (Credit Card / Tabular PDFs) ---
     lines.forEach((line, index) => {
-      // Ignore header lines or balance summary lines
       const lower = line.toLowerCase();
       if (
         lower.includes('statement date') ||
@@ -170,8 +183,9 @@ export class StatementParserService {
         lower.includes('payment due date') ||
         lower.includes('minimum amount due') ||
         lower.includes('total amount due') ||
-        lower.includes('card number') ||
-        lower.includes('credit limit')
+        lower.includes('opening balance') ||
+        lower.includes('closing balance') ||
+        lower.includes('page ')
       ) {
         return;
       }
@@ -179,47 +193,43 @@ export class StatementParserService {
       const dateMatch = line.match(dateRegex);
       if (!dateMatch) return;
 
-      // Match amounts in line
-      const amounts = Array.from(line.matchAll(/(\d{1,3}(?:,\d{3})*\.\d{2})/g));
+      const amounts = Array.from(line.matchAll(currencyAmountRegex))
+        .map(m => m[1] ? m[1].replace(/,/g, '') : '')
+        .filter(val => val && !isNaN(parseFloat(val)) && parseFloat(val) > 0);
+
       if (amounts.length === 0) return;
 
-      // Extract raw date string & format into YYYY-MM-DD
       const rawDateStr = dateMatch[0];
       const parsedDate = this.normalizeDate(rawDateStr, currentYear);
       if (!parsedDate) return;
 
-      // Extract amount (usually the last or principal amount in row)
-      const lastAmountStr = amounts[amounts.length - 1][0].replace(/,/g, '');
+      const lastAmountStr = amounts[amounts.length - 1];
       const parsedAmount = parseFloat(lastAmountStr);
       if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
-      // Determine Cr / Dr (Income vs Expense)
-      const isCredit = lower.includes(' cr') || lower.includes('credit') || lower.includes('payment received') || lower.includes('refund');
+      const isCredit = lower.includes(' cr') || lower.includes('credit') || lower.includes('received') || lower.includes('refund') || lower.includes('cashback') || lower.includes('+');
       const type: 'expense' | 'income' = isCredit ? 'income' : 'expense';
 
-      // Clean Title Description
       let title = line
         .replace(dateMatch[0], '')
         .replace(lastAmountStr, '')
-        .replace(/cr|dr|credit|debit/gi, '')
+        .replace(/[₹\$]|INR|cr|dr|credit|debit|completed|success/gi, '')
         .replace(/[^\w\s\-\.\,\/]/gi, '')
         .trim();
 
       if (!title || title.length < 3) {
-        title = `Transaction ${parsedDate}`;
+        title = `UPI Payment ${parsedDate}`;
       }
 
-      // Truncate long merchant description
       if (title.length > 50) {
         title = title.substring(0, 50).trim();
       }
 
-      // Categorize automatically
       const categoryId = this.autoCategorize(title, type);
       const subCategory = this.extractSubCategoryTag(title);
 
       results.push({
-        id: `stmt-tx-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 4)}`,
+        id: `stmt-p1-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 4)}`,
         selected: true,
         date: parsedDate,
         title,
@@ -227,11 +237,83 @@ export class StatementParserService {
         type,
         categoryId,
         subCategory,
-        paymentMethod: 'Credit Card',
-        notes: `Imported from statement (${rawDateStr})`,
+        paymentMethod: defaultPm,
+        notes: `Imported statement row (${rawDateStr})`,
         rawText: line,
       });
     });
+
+    // If Pass 1 found rows, return them!
+    if (results.length > 0) return results;
+
+    // --- PASS 2: GPay & PhonePe Multi-Line Block Extractor ---
+    // GPay statements often split Date, Title, Amount across 2-4 consecutive lines
+    for (let i = 0; i < lines.length; i++) {
+      const windowLines = lines.slice(i, i + 4);
+      const windowText = windowLines.join(' ');
+      const windowLower = windowText.toLowerCase();
+
+      // Look for amount in block (e.g. ₹450.00 or Paid ₹450 or + ₹1,000)
+      const amountMatch = windowText.match(/(?:₹|INR|\$)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/i) ||
+                          windowText.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+
+      // Look for date in block
+      const dateMatch = windowText.match(dateRegex);
+
+      if (amountMatch && dateMatch) {
+        const rawAmountStr = amountMatch[1].replace(/,/g, '');
+        const parsedAmount = parseFloat(rawAmountStr);
+
+        const rawDateStr = dateMatch[0];
+        const parsedDate = this.normalizeDate(rawDateStr, currentYear);
+
+        if (parsedAmount > 0 && parsedDate) {
+          // Identify Title Description from window lines
+          let titleLine = windowLines.find(l => {
+            const lLow = l.toLowerCase();
+            return !l.match(dateRegex) &&
+                   !l.includes(amountMatch[0]) &&
+                   !lLow.includes('upi ref') &&
+                   !lLow.includes('completed') &&
+                   !lLow.includes('success') &&
+                   !lLow.includes('transaction id');
+          }) || windowLines[0];
+
+          let cleanTitle = titleLine
+            .replace(/(?:paid to|payment to|received from|transfer to|debit|credit)/gi, '')
+            .replace(/[₹\$]|INR/gi, '')
+            .replace(/[^\w\s\-\.\,\/]/gi, '')
+            .trim();
+
+          if (!cleanTitle || cleanTitle.length < 3) {
+            cleanTitle = `GPay Payment ${parsedDate}`;
+          }
+
+          const isCredit = windowLower.includes('received from') || windowLower.includes('credit') || windowLower.includes('refund') || windowLower.includes('+');
+          const type: 'expense' | 'income' = isCredit ? 'income' : 'expense';
+
+          const categoryId = this.autoCategorize(cleanTitle, type);
+          const subCategory = this.extractSubCategoryTag(cleanTitle);
+
+          results.push({
+            id: `stmt-p2-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
+            selected: true,
+            date: parsedDate,
+            title: cleanTitle,
+            amount: parsedAmount,
+            type,
+            categoryId,
+            subCategory,
+            paymentMethod: defaultPm,
+            notes: `GPay statement import (${rawDateStr})`,
+            rawText: windowText,
+          });
+
+          // Advance loop pointer past window block
+          i += 3;
+        }
+      }
+    }
 
     return results;
   }
@@ -241,9 +323,15 @@ export class StatementParserService {
    */
   private static normalizeDate(dateStr: string, defaultYear: number): string | null {
     try {
-      const clean = dateStr.trim();
+      const clean = dateStr.replace(/,/g, '').trim();
 
-      // Case 1: DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+      // Case 1: YYYY-MM-DD or YYYY/MM/DD
+      if (/^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}$/.test(clean)) {
+        const parts = clean.split(/[\/\-\.]/);
+        return `${parts[0]}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+      }
+
+      // Case 2: DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
       if (/^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test(clean)) {
         const parts = clean.split(/[\/\-\.]/);
         let day = parseInt(parts[0]);
@@ -252,7 +340,6 @@ export class StatementParserService {
 
         if (year < 100) year += 2000;
         if (month > 12) {
-          // Swapped DD & MM
           const temp = day;
           day = month;
           month = temp;
@@ -261,25 +348,35 @@ export class StatementParserService {
         return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       }
 
-      // Case 2: DD MMM YYYY or DD MMM (e.g. 15 Aug 2026 or 15 Aug)
+      // Case 3: Aug 15 2026 or 15 Aug 2026 or Aug 15
       const monthsMap: Record<string, string> = {
         jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
         jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
       };
 
-      const alphaParts = clean.split(/[\s\-\/]/);
-      if (alphaParts.length >= 2) {
-        const day = parseInt(alphaParts[0]);
-        const monthKey = alphaParts[1].substring(0, 3).toLowerCase();
-        const month = monthsMap[monthKey];
+      const parts = clean.split(/\s+/);
+      let day: number | null = null;
+      let month: string | null = null;
+      let year = defaultYear;
 
-        if (day > 0 && day <= 31 && month) {
-          const year = alphaParts.length >= 3 && !isNaN(parseInt(alphaParts[2]))
-            ? (parseInt(alphaParts[2]) < 100 ? 2000 + parseInt(alphaParts[2]) : parseInt(alphaParts[2]))
-            : defaultYear;
-
-          return `${year}-${month}-${String(day).padStart(2, '0')}`;
+      parts.forEach((p) => {
+        const pLow = p.toLowerCase().substring(0, 3);
+        if (monthsMap[pLow]) {
+          month = monthsMap[pLow];
+        } else {
+          const num = parseInt(p.replace(/\D/g, ''));
+          if (!isNaN(num)) {
+            if (num > 31) {
+              year = num < 100 ? 2000 + num : num;
+            } else if (num > 0) {
+              day = num;
+            }
+          }
         }
+      });
+
+      if (day && month) {
+        return `${year}-${month}-${String(day).padStart(2, '0')}`;
       }
 
       return null;
