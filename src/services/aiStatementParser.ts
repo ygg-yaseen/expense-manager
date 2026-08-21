@@ -2,7 +2,7 @@ import type { ExtractedStatementTx } from './statementParser';
 
 export class AIStatementParserService {
   /**
-   * Use Google Gemini Flash API to parse PDF text into 100% accurate transactions with fallback models
+   * Use Google Gemini Flash API (gemini-1.5-flash) to parse PDF text into 100% accurate transactions
    */
   static async parseWithGemini(
     pdfText: string,
@@ -32,9 +32,9 @@ Statement PDF Text to analyze:
 ${pdfText.substring(0, 15000)}
 `;
 
-    // Try available Gemini Flash models in priority order
-    const candidateModels = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-exp'];
-    let lastError: Error | null = null;
+    // Production Gemini models supported on Google AI Studio
+    const candidateModels = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+    let lastErrorMessage = '';
 
     for (const model of candidateModels) {
       try {
@@ -65,22 +65,22 @@ ${pdfText.substring(0, 15000)}
 
         if (!response.ok) {
           const errJson = await response.json().catch(() => ({}));
-          lastError = new Error(errJson?.error?.message || `Gemini API error for ${model} (Status ${response.status})`);
-          continue; // Try next model candidate
+          lastErrorMessage = errJson?.error?.message || `Gemini API error (Status ${response.status})`;
+          continue; // Try next model candidate if first returns error
         }
 
         const data = await response.json();
         const rawOutput = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!rawOutput) {
-          lastError = new Error(`Gemini AI (${model}) returned empty response.`);
+          lastErrorMessage = `Gemini AI (${model}) returned empty response.`;
           continue;
         }
 
         // Parse JSON
         const jsonArr = JSON.parse(rawOutput);
         if (!Array.isArray(jsonArr)) {
-          lastError = new Error(`Gemini AI (${model}) output was not an array`);
+          lastErrorMessage = `Gemini AI (${model}) output was not a valid array`;
           continue;
         }
 
@@ -98,10 +98,10 @@ ${pdfText.substring(0, 15000)}
           rawText: `${item.title} ${item.amount}`,
         }));
       } catch (err: any) {
-        lastError = err;
+        lastErrorMessage = err.message || 'Network error connecting to Gemini API.';
       }
     }
 
-    throw lastError || new Error('Failed to parse statement with Gemini AI models.');
+    throw new Error(lastErrorMessage || 'Failed to parse statement with Gemini AI.');
   }
 }
