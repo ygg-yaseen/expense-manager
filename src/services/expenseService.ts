@@ -196,11 +196,12 @@ export class ExpenseService {
 
     const now = new Date();
     const currentMonthYear = now.toISOString().slice(0, 7);
+    const isAllTime = targetMonthYear === 'all';
     const isCurrentMonth = targetMonthYear === currentMonthYear;
 
-    const year = parseInt(targetMonthYear.slice(0, 4));
-    const month = parseInt(targetMonthYear.slice(5, 7));
-    const daysInMonth = new Date(year, month, 0).getDate();
+    const year = !isAllTime && targetMonthYear.length >= 7 ? parseInt(targetMonthYear.slice(0, 4)) : now.getFullYear();
+    const month = !isAllTime && targetMonthYear.length >= 7 ? parseInt(targetMonthYear.slice(5, 7)) : now.getMonth() + 1;
+    const daysInMonth = isNaN(year) || isNaN(month) ? 30 : new Date(year, month, 0).getDate();
 
     let elapsedDays = daysInMonth;
     let daysRemainingInMonth = 0;
@@ -210,7 +211,7 @@ export class ExpenseService {
       daysRemainingInMonth = Math.max(0, daysInMonth - elapsedDays);
     }
 
-    const dailyAverage = Math.round((totalSpent / elapsedDays) * 100) / 100;
+    const dailyAverage = Math.round((totalSpent / (elapsedDays || 1)) * 100) / 100;
 
     const projectedTotal = dailyAverage * daysInMonth;
     let spendingPace: 'under' | 'moderate' | 'over' = 'under';
@@ -222,7 +223,8 @@ export class ExpenseService {
 
     const categoryMap: Record<string, number> = {};
     txs.filter(t => t.type === 'expense').forEach(t => {
-      categoryMap[t.categoryId] = (categoryMap[t.categoryId] || 0) + t.amount;
+      const catId = t.categoryId || 'other';
+      categoryMap[catId] = (categoryMap[catId] || 0) + t.amount;
     });
 
     let topCategoryId: string | undefined;
@@ -235,7 +237,7 @@ export class ExpenseService {
       }
     });
 
-    const allCats = AuthService.getCategories(profile);
+    const allCats = AuthService.getCategories(profile, true);
     const topCategoryDef = topCategoryId ? allCats.find(c => c.id === topCategoryId) : undefined;
     const topCategory = topCategoryDef ? { category: topCategoryDef, total: maxCategorySpent } : undefined;
 
@@ -252,10 +254,12 @@ export class ExpenseService {
   }
 
   static getCategoryBreakdown(monthYear?: string): Array<{
+    name: string;
     category: CategoryDef;
     total: number;
     percentage: number;
     count: number;
+    color: string;
   }> {
     const profile = AuthService.getProfile();
     // Include all categories (including archived & custom) for resolution
@@ -286,10 +290,12 @@ export class ExpenseService {
         };
 
         return {
+          name: category.name,
           category,
           total: data.total,
           count: data.count,
           percentage: totalExpense > 0 ? Math.round((data.total / totalExpense) * 100) : 0,
+          color: category.color,
         };
       })
       .sort((a, b) => b.total - a.total);

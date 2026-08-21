@@ -240,6 +240,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile, onOpenAddExpense,
                       outerRadius={75}
                       paddingAngle={4}
                       dataKey="total"
+                      nameKey="name"
                     >
                       {categoryBreakdown.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.category.color} />
