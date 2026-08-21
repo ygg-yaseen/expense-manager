@@ -7,12 +7,14 @@ import {
   Calendar, 
   ReceiptText,
   FileSpreadsheet,
-  MapPin
+  MapPin,
+  FileText
 } from 'lucide-react';
 import type { Transaction, UserProfile } from '../types';
 import { AuthService } from '../services/authService';
 import { ExpenseService } from '../services/expenseService';
 import { StorageService } from '../services/storage';
+import { StatementImportModal } from './StatementImportModal';
 
 interface TransactionsProps {
   profile: UserProfile;
@@ -33,6 +35,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
   const [selectedType, setSelectedType] = useState<'all' | 'expense' | 'income'>('all');
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
   const sym = profile.currency.symbol;
   const categories = AuthService.getCategories(profile);
@@ -97,11 +100,18 @@ export const Transactions: React.FC<TransactionsProps> = ({
             <ReceiptText className="w-6 h-6 text-indigo-400" /> Transactions Ledger
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Search, filter by main or sub-category, edit, or export your complete transaction history.
+            Search, filter by main or sub-category, import PDF statements, edit, or export your complete transaction history.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-indigo-400 text-xs font-bold transition cursor-pointer"
+            title="Import Credit Card PDF Statement"
+          >
+            <FileText className="w-4 h-4 text-indigo-400" /> Import Card PDF
+          </button>
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer"
@@ -296,17 +306,33 @@ export const Transactions: React.FC<TransactionsProps> = ({
             <ReceiptText className="w-12 h-12 text-slate-600 mx-auto" />
             <h3 className="text-base font-bold text-slate-300">No Transactions Found</h3>
             <p className="text-xs text-slate-500 max-w-xs mx-auto">
-              Try adjusting your search query or filters, or add a new expense transaction.
+              Try adjusting your search query or filters, import a credit card PDF statement, or add a new transaction.
             </p>
-            <button
-              onClick={onOpenAddExpense}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> Add Transaction Now
-            </button>
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 text-xs font-semibold border border-slate-700 transition inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <FileText className="w-4 h-4" /> Import Card PDF
+              </button>
+              <button
+                onClick={onOpenAddExpense}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> Add Transaction
+              </button>
+            </div>
           </div>
         )}
       </div>
+
+      {/* Credit Card PDF Statement Importer Modal */}
+      <StatementImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onRefreshData={onRefreshData}
+        profile={profile}
+      />
     </div>
   );
 };
