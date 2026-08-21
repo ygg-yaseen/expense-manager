@@ -1,7 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PaymentMethod } from '../types';
 
-// Configure PDF.js worker via CDN or bundler
+// Configure PDF.js worker via CDN
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 export interface ExtractedStatementTx {
@@ -37,8 +37,10 @@ export class StatementParserService {
     password?: string
   ): Promise<StatementParseResult> {
     try {
+      // Clone buffer to prevent ArrayBuffer detachment across password retry attempts
+      const bufferCopy = arrayBuffer.slice(0);
       const loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(arrayBuffer),
+        data: new Uint8Array(bufferCopy),
         password: password || '',
       });
 
@@ -149,7 +151,6 @@ export class StatementParserService {
 
     // Date Pattern RegExes (e.g. DD/MM/YYYY, DD-MM-YYYY, DD MMM YYYY, DD/MM/YY)
     const dateRegex = /(\d{1,2}[\/\-\.](?:\d{1,2}|[A-Za-z]{3})[\/\-\.]\d{2,4})|(\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})|(\d{1,2}\s+[A-Za-z]{3})/i;
-
     const currentYear = new Date().getFullYear();
 
     lines.forEach((line, index) => {
