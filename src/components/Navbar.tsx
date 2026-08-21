@@ -71,9 +71,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-slate-100 text-lg tracking-tight">ExpenseFlow</span>
-                <span className="text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  Pro Multi-User
-                </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Simple Personal Expense Manager</p>
             </div>

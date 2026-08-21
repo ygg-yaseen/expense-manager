@@ -110,7 +110,7 @@ export const Transactions: React.FC<TransactionsProps> = ({
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-indigo-400 text-xs font-bold transition cursor-pointer"
             title="Import Credit Card PDF Statement"
           >
-            <FileText className="w-4 h-4 text-indigo-400" /> Import Card PDF
+            <FileText className="w-4 h-4 text-indigo-400" /> Import Statement
           </button>
           <button
             onClick={handleExportCSV}
