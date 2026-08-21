@@ -26,6 +26,7 @@ export interface StatementParseResult {
   bankName?: string;
   totalSpent: number;
   totalCredits: number;
+  fullPdfText?: string;
 }
 
 export class StatementParserService {
@@ -82,16 +83,18 @@ export class StatementParserService {
         }
       }
 
+      const fullPdfText = fullTextLines.join('\n');
+
       // Detect Bank / Issuer (GPay, PhonePe, Paytm, HDFC, ICICI, etc.)
       const bankName = this.detectBank(fullTextLines);
 
       // Default payment method for detected issuer
-      const defaultPaymentMethod = bankName.toLowerCase().includes('google pay') || bankName.toLowerCase().includes('gpay') || bankName.toLowerCase().includes('upi')
+      const defaultPaymentMethod = bankName.toLowerCase().includes('google pay') || bankName.toLowerCase().includes('gpay') || bankName.toLowerCase().includes('upi') || bankName.toLowerCase().includes('phonepe') || bankName.toLowerCase().includes('paytm')
         ? 'UPI/Mobile Wallet'
         : 'Credit Card';
 
-      // Parse transaction rows with multi-pass strategy (Single-line + GPay multi-line blocks)
-      const extracted = this.extractTransactions(fullTextLines, defaultPaymentMethod);
+      // Parse transaction rows with multi-pass strategy (GPay block parser + Single-line parser)
+      const extracted = this.extractTransactions(fullTextLines, defaultPaymentMethod, bankName);
 
       const totalSpent = extracted
         .filter((t) => t.type === 'expense')
@@ -108,6 +111,7 @@ export class StatementParserService {
         transactions: extracted,
         totalSpent,
         totalCredits,
+        fullPdfText,
       };
     } catch (err: any) {
       console.error('PDF Parse Error:', err);
@@ -163,18 +167,98 @@ export class StatementParserService {
   /**
    * Multi-Pass Transaction Extraction Engine
    */
-  private static extractTransactions(lines: string[], defaultPm: PaymentMethod): ExtractedStatementTx[] {
+  private static extractTransactions(lines: string[], defaultPm: PaymentMethod, bankName: string): ExtractedStatementTx[] {
     const results: ExtractedStatementTx[] = [];
     const currentYear = new Date().getFullYear();
+    const isUpiStatement = bankName.toLowerCase().includes('google pay') ||
+                           bankName.toLowerCase().includes('gpay') ||
+                           bankName.toLowerCase().includes('phonepe') ||
+                           bankName.toLowerCase().includes('paytm') ||
+                           bankName.toLowerCase().includes('upi');
 
     // RegEx patterns
     // Matches dates like: 15 Aug 2026, Aug 15, 2026, 15/08/2026, 15-08-2026, 2026-08-15
     const dateRegex = /(\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b)|(\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b)|(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,\s*\d{2,4}\b)|(\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{2,4})?\b)/i;
-    
-    // Matches Currency Amounts like: ₹450.00, ₹ 1,299.50, INR 500, $45.00, 1,250.00
+
+    // --- PASS 1: GPay & PhonePe Multi-Line Block Extractor (Run first for UPI statements!) ---
+    if (isUpiStatement) {
+      for (let i = 0; i < lines.length; i++) {
+        const windowLines = lines.slice(i, i + 5);
+        const windowText = windowLines.join(' ');
+        const windowLower = windowText.toLowerCase();
+
+        // Look for amount in block (e.g. ₹450.00 or Paid ₹450 or + ₹1,000)
+        const amountMatch = windowText.match(/(?:₹|INR|\$)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/i) ||
+                            windowText.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+
+        // Look for date in block
+        const dateMatch = windowText.match(dateRegex);
+
+        if (amountMatch && dateMatch) {
+          const rawAmountStr = amountMatch[1].replace(/,/g, '');
+          const parsedAmount = parseFloat(rawAmountStr);
+
+          const rawDateStr = dateMatch[0];
+          const parsedDate = this.normalizeDate(rawDateStr, currentYear);
+
+          if (parsedAmount > 0 && parsedDate) {
+            // Identify Title Description from window lines
+            let titleLine = windowLines.find(l => {
+              const lLow = l.toLowerCase();
+              return !l.match(dateRegex) &&
+                     !l.includes(amountMatch[0]) &&
+                     !lLow.includes('upi ref') &&
+                     !lLow.includes('completed') &&
+                     !lLow.includes('success') &&
+                     !lLow.includes('transaction id');
+            }) || windowLines[0];
+
+            let cleanTitle = titleLine
+              .replace(/^(?:paid to|payment to|received from|transfer to)\s*/gi, '')
+              .replace(/(?:\bdebit\b|\bcredit\b|[₹\$]|INR)/gi, '')
+              .trim()
+              .replace(/\s+/g, ' ');
+
+            if (!cleanTitle || cleanTitle.length < 2) {
+              cleanTitle = `GPay Payment ${parsedDate}`;
+            }
+
+            if (cleanTitle.length > 120) {
+              cleanTitle = cleanTitle.substring(0, 120).trim();
+            }
+
+            const isCredit = windowLower.includes('received from') || windowLower.includes('credit') || windowLower.includes('refund') || windowLower.includes('+');
+            const type: 'expense' | 'income' = isCredit ? 'income' : 'expense';
+
+            const categoryId = this.autoCategorize(cleanTitle, type);
+            const subCategory = this.extractSubCategoryTag(cleanTitle);
+
+            results.push({
+              id: `stmt-gpay-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
+              selected: true,
+              date: parsedDate,
+              title: cleanTitle,
+              amount: parsedAmount,
+              type,
+              categoryId,
+              subCategory,
+              paymentMethod: defaultPm,
+              notes: `GPay statement import (${rawDateStr})`,
+              rawText: windowText,
+            });
+
+            // Advance loop pointer past window block
+            i += 2;
+          }
+        }
+      }
+
+      if (results.length > 0) return results;
+    }
+
+    // --- PASS 2: Single Line Extractor (Credit Card / Tabular PDFs) ---
     const currencyAmountRegex = /(?:₹|INR|\$|AED|EUR|£)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/g;
 
-    // --- PASS 1: Single Line Extractor (Credit Card / Tabular PDFs) ---
     lines.forEach((line, index) => {
       const lower = line.toLowerCase();
       if (
@@ -242,82 +326,6 @@ export class StatementParserService {
         rawText: line,
       });
     });
-
-    // If Pass 1 found rows, return them!
-    if (results.length > 0) return results;
-
-    // --- PASS 2: GPay & PhonePe Multi-Line Block Extractor ---
-    // GPay statements often split Date, Title, Amount across 2-4 consecutive lines
-    for (let i = 0; i < lines.length; i++) {
-      const windowLines = lines.slice(i, i + 4);
-      const windowText = windowLines.join(' ');
-      const windowLower = windowText.toLowerCase();
-
-      // Look for amount in block (e.g. ₹450.00 or Paid ₹450 or + ₹1,000)
-      const amountMatch = windowText.match(/(?:₹|INR|\$)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/i) ||
-                          windowText.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
-
-      // Look for date in block
-      const dateMatch = windowText.match(dateRegex);
-
-      if (amountMatch && dateMatch) {
-        const rawAmountStr = amountMatch[1].replace(/,/g, '');
-        const parsedAmount = parseFloat(rawAmountStr);
-
-        const rawDateStr = dateMatch[0];
-        const parsedDate = this.normalizeDate(rawDateStr, currentYear);
-
-        if (parsedAmount > 0 && parsedDate) {
-          // Identify Title Description from window lines
-          let titleLine = windowLines.find(l => {
-            const lLow = l.toLowerCase();
-            return !l.match(dateRegex) &&
-                   !l.includes(amountMatch[0]) &&
-                   !lLow.includes('upi ref') &&
-                   !lLow.includes('completed') &&
-                   !lLow.includes('success') &&
-                   !lLow.includes('transaction id');
-          }) || windowLines[0];
-
-          let cleanTitle = titleLine
-            .replace(/^(?:paid to|payment to|received from|transfer to)\s*/gi, '')
-            .replace(/(?:\bdebit\b|\bcredit\b|[₹\$]|INR)/gi, '')
-            .trim()
-            .replace(/\s+/g, ' ');
-
-          if (!cleanTitle || cleanTitle.length < 2) {
-            cleanTitle = `GPay Payment ${parsedDate}`;
-          }
-
-          if (cleanTitle.length > 120) {
-            cleanTitle = cleanTitle.substring(0, 120).trim();
-          }
-
-          const isCredit = windowLower.includes('received from') || windowLower.includes('credit') || windowLower.includes('refund') || windowLower.includes('+');
-          const type: 'expense' | 'income' = isCredit ? 'income' : 'expense';
-
-          const categoryId = this.autoCategorize(cleanTitle, type);
-          const subCategory = this.extractSubCategoryTag(cleanTitle);
-
-          results.push({
-            id: `stmt-p2-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
-            selected: true,
-            date: parsedDate,
-            title: cleanTitle,
-            amount: parsedAmount,
-            type,
-            categoryId,
-            subCategory,
-            paymentMethod: defaultPm,
-            notes: `GPay statement import (${rawDateStr})`,
-            rawText: windowText,
-          });
-
-          // Advance loop pointer past window block
-          i += 3;
-        }
-      }
-    }
 
     return results;
   }
